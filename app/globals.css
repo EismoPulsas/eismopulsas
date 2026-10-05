@@ -1,7 +1,231 @@
 @import "tailwindcss";
 
+/* Eismo Pulsas is a dark-first app: the map and charts are tuned for a dark surface. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #12151d;
+  --chip: #1d2230;
+  --line: #262c3b;
+  --ink: #eef1f7;
+  --muted: #8e97ab;
+  --accent: #2ee6c8;
+  --fatal: #ff4d5e;
+  --injury: #ffb020;
+  --damage: #7d8db0;
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-grotesk), var(--font-inter), system-ui, sans-serif;
+}
+
 html,
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* ---------------------------------------------------------- logo pulse */
+.ep-ecg path {
+  stroke-dasharray: 60;
+  animation: ep-ecg 2.4s ease-in-out infinite;
+}
+@keyframes ep-ecg {
+  0% { stroke-dashoffset: 60; }
+  45%, 100% { stroke-dashoffset: 0; }
+}
+
+.ep-glow {
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 60%, transparent);
+  animation: ep-glow 2.4s ease-out infinite;
+}
+@keyframes ep-glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 14px transparent; }
+}
+
+.ep-dot-pulse {
+  animation: ep-dot 1.6s ease-out infinite;
+}
+@keyframes ep-dot {
+  0% { box-shadow: 0 0 0 0 rgba(255, 77, 94, 0.7); }
+  100% { box-shadow: 0 0 0 8px rgba(255, 77, 94, 0); }
+}
+
+/* ---------------------------------------------------------- leaflet */
+.leaflet-container {
+  background: #0e1118;
+  font-family: var(--font-sans);
+}
+.ep-reporting .leaflet-container {
+  cursor: crosshair;
+}
+.leaflet-control-zoom a,
+.leaflet-bar a {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(11, 13, 18, 0.75) !important;
+  color: var(--muted) !important;
+}
+.leaflet-control-attribution a {
+  color: #b9c3d8 !important;
+}
+
+.ep-tooltip {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 6px 10px;
+}
+.ep-tooltip::before {
+  display: none;
+}
+
+.ep-popup .leaflet-popup-content-wrapper,
+.ep-popup .leaflet-popup-tip {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.ep-popup .leaflet-popup-content {
+  margin: 12px 14px;
+}
+.leaflet-container a.leaflet-popup-close-button {
+  color: var(--muted);
+}
+
+/* pulsing ring for fatal accidents on the timeline */
+.ep-pulse {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--fatal);
+  animation: ep-ring 1.4s ease-out infinite;
+}
+@keyframes ep-ring {
+  0% { transform: scale(0.4); opacity: 1; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* hotspot badge */
+.ep-hotspot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  padding: 2px 8px 2px 3px;
+  border-radius: 999px;
+  background: #fff;
+  color: #0b0d12;
+  font: 700 12px/18px var(--font-sans);
+  box-shadow: 0 0 0 2px var(--fatal), 0 0 18px rgba(255, 77, 94, 0.65);
+  cursor: pointer;
+}
+.ep-hotspot-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--fatal);
+  color: #fff;
+  font-size: 10px;
+}
+
+/* user report marker */
+.ep-report {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 50% 50% 50% 8px;
+  background: var(--c);
+  color: #0b0d12;
+  font-size: 13px;
+  box-shadow: 0 0 0 2px #0b0d12, 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+.ep-report b {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #fff;
+  color: #0b0d12;
+  font: 700 11px/18px var(--font-sans);
+  text-align: center;
+  box-shadow: 0 0 0 2px #0b0d12;
+}
+.ep-report-mini {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50% 50% 50% 4px;
+  background: var(--c);
+  color: #0b0d12;
+  font-size: 11px;
+}
+
+.ep-draft {
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px #0b0d12, 0 0 22px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ep-ecg path,
+  .ep-glow,
+  .ep-dot-pulse,
+  .ep-pulse {
+    animation: none;
+  }
+}
+
+/* selected accident / place */
+.ep-selected {
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px rgba(11, 13, 18, 0.8), 0 0 18px var(--accent);
+}
+
+/* official black spot (Policijos EĮIS) */
+.ep-blackspot {
+  position: absolute;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  background: #ff2e88;
+  color: #fff;
+  font: 800 11px/1 var(--font-sans);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px #0b0d12, 0 0 14px rgba(255, 46, 136, 0.7);
+}
+.ep-blackspot > span {
+  transform: rotate(-45deg);
 }
