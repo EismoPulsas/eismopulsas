@@ -43,3 +43,8 @@ next-env.d.ts
 
 # local user reports (file store)
 .data/
+
+# mobile/ is a separate Expo project with its own .gitignore (ADR-0003);
+# these lines are a safety net in case that file is missing.
+/mobile/node_modules/
+/mobile/.expo/
