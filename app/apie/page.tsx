@@ -285,6 +285,7 @@ export default function About() {
 GET /api/drive?from=54.7329,25.2236&to=54.6800,25.2800&depart=2026-10-12T05:02:00Z
 GET /api/traffic          # gyvi Via Lietuva jutikliai
 GET /api/bikeshare        # Cyclocity stotelės realiu laiku
+GET /api/walk?from=…&to=… # ėjimas gatvėmis (žemėlapio atkarpoms)
 GET /api/scooters?bbox=…  # paspirtukai (GBFS arba DEMO)
 GET /api/stops?bbox=…     # VT stotelės ir jų maršrutai
 GET /api/stops?id=…       # artimiausi išvykimai iš stotelės

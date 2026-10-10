@@ -137,6 +137,7 @@ GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876[&depart=2026-10-12T08:00]
 GET /api/drive?from=54.7329,25.2236&to=54.6800,25.2800[&depart=2026-10-12T05:02:00Z]
 GET /api/traffic
 GET /api/bikeshare
+GET /api/walk?from=54.6830,25.2850&to=54.6812,25.2876
 GET /api/scooters?bbox=54.66,25.24,54.70,25.32
 GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 GET /api/parking[?chargers=1]

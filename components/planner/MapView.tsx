@@ -854,7 +854,7 @@ export default function MapView({
           ))}
         {plan?.scooter?.vehicle && selected === "scooter" && (
           <>
-            <Polyline positions={plan.scooter.vehicle.walkGeometry ?? [plan.from, plan.scooter.vehicle.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <StreetWalk from={plan.from} to={plan.scooter.vehicle.pos} geometry={plan.scooter.vehicle.walkGeometry} />
             <Marker position={plan.scooter.vehicle.pos} icon={stopIcon(MODE_META.scooter.color)}>
               <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
                 <b>{plan.scooter.source === "demo" ? "DEMO paspirtukas" : "Artimiausias paspirtukas"}</b>
@@ -867,8 +867,8 @@ export default function MapView({
         )}
         {plan?.bikeshare && selected === "bikeshare" && (
           <>
-            <Polyline positions={plan.bikeshare.walkToGeometry ?? [plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            <Polyline positions={plan.bikeshare.walkFromGeometry ?? [plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <StreetWalk from={plan.from} to={plan.bikeshare.from.pos} geometry={plan.bikeshare.walkToGeometry} />
+            <StreetWalk from={plan.bikeshare.to.pos} to={plan.to} geometry={plan.bikeshare.walkFromGeometry} />
             <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: look.light ? "#ffffff" : "#05060a", weight: 9, opacity: look.light ? 1 : 0.85 }} />
             <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
             {[
@@ -890,7 +890,7 @@ export default function MapView({
         {/* Where the car is left, and the walk from there to B. */}
         {selected === "car" && parkingSpot && to && (
           <>
-            <Polyline positions={[parkingSpot.pos, to]} interactive={false} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <StreetWalk from={parkingSpot.pos} to={to} />
             <Marker position={parkingSpot.pos} icon={SPOT}>
               <Tooltip className="ep-tooltip" direction="top" offset={[0, -10]}>
                 <b>Paliksite automobilį</b>
@@ -1159,13 +1159,52 @@ function LayersPanel({
 
 /** A walk along streets (or the straight line when no path is known), dotted. */
 const WALK_LINE = { color: "#94a3b8", weight: 3, dashArray: "2 8", opacity: 0.9 };
+
+// Street paths fetched by the browser, shared by every StreetWalk on the page.
+const walkCache = new Map<string, Promise<LatLng[] | null>>();
+function streetPath(a: LatLng, b: LatLng): Promise<LatLng[] | null> {
+  const key = `${a[0].toFixed(5)},${a[1].toFixed(5)}>${b[0].toFixed(5)},${b[1].toFixed(5)}`;
+  let p = walkCache.get(key);
+  if (!p) {
+    p = fetch(`/api/walk?from=${a[0]},${a[1]}&to=${b[0]},${b[1]}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { coords: LatLng[]; routed: boolean } | null) => (d?.routed ? d.coords : null))
+      .catch(() => null);
+    walkCache.set(key, p);
+  }
+  return p;
+}
+
+/**
+ * A walk drawn along streets. Uses the server's path when the plan has one;
+ * otherwise asks /api/walk for just this leg. Draws nothing until the path is
+ * known, so nobody is shown walking through buildings; if no router answers, the
+ * straight line is the honest fallback.
+ */
+function StreetWalk({ from, to, geometry, color = WALK_LINE.color }: { from: LatLng; to: LatLng; geometry?: LatLng[]; color?: string }) {
+  const known = geometry && geometry.length > 2 ? geometry : null;
+  const [fetched, setFetched] = useState<{ key: string; path: LatLng[] } | null>(null);
+  const key = `${from}|${to}`;
+  useEffect(() => {
+    if (known) return;
+    let alive = true;
+    streetPath(from, to).then((p) => alive && setFetched({ key, path: p ?? [from, to] }));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, !!known]);
+  const path = known ?? (fetched?.key === key ? fetched.path : null);
+  if (!path) return null;
+  return <Polyline positions={path} interactive={false} pathOptions={{ ...WALK_LINE, color }} />;
+}
 const casing = (light: boolean) => ({ color: light ? "#ffffff" : "#05060a", opacity: light ? 1 : 0.85 });
 
 /** Rides in their route colours with boarding and alighting stops; walks dotted along streets. */
 function TransitLegs({ legs, light }: { legs: TransitLeg[]; light: boolean }) {
   return legs.map((l, i) =>
     l.kind === "walk" ? (
-      <Polyline key={i} positions={l.geometry ?? [l.from, l.to]} pathOptions={{ ...WALK_LINE, color: l.tight ? STATUS.wait : WALK_LINE.color }} />
+      <StreetWalk key={i} from={l.from} to={l.to} geometry={l.geometry} color={l.tight ? STATUS.wait : WALK_LINE.color} />
     ) : (
       <Fragment key={i}>
         <Polyline positions={l.geometry} pathOptions={{ ...casing(light), weight: 10 }} />
@@ -1204,8 +1243,8 @@ function HybridRoute({ h, to, light }: { h: HybridOption; to: LatLng; light: boo
       {s.kind === "transit" && <TransitLegs legs={s.transit.legs} light={light} />}
       {s.kind === "bikeshare" && (
         <>
-          <Polyline positions={s.bikeshare.walkToGeometry ?? [hub, s.bikeshare.from.pos]} pathOptions={WALK_LINE} />
-          <Polyline positions={s.bikeshare.walkFromGeometry ?? [s.bikeshare.to.pos, to]} pathOptions={WALK_LINE} />
+          <StreetWalk from={hub} to={s.bikeshare.from.pos} geometry={s.bikeshare.walkToGeometry} />
+          <StreetWalk from={s.bikeshare.to.pos} to={to} geometry={s.bikeshare.walkFromGeometry} />
           <Polyline positions={s.bikeshare.geometry} pathOptions={{ ...casing(light), weight: 9 }} />
           <Polyline positions={s.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
           <Marker position={s.bikeshare.from.pos} icon={stopIcon(MODE_META.bikeshare.color)}>
@@ -1224,8 +1263,8 @@ function HybridRoute({ h, to, light }: { h: HybridOption; to: LatLng; light: boo
       )}
       {s.kind === "scooter" && (
         <>
-          {s.scooter.vehicle && <Polyline positions={s.scooter.vehicle.walkGeometry ?? [hub, s.scooter.vehicle.pos]} pathOptions={WALK_LINE} />}
-          {s.scooter.endSpot && <Polyline positions={[s.scooter.endSpot.pos, to]} pathOptions={WALK_LINE} />}
+          {s.scooter.vehicle && <StreetWalk from={hub} to={s.scooter.vehicle.pos} geometry={s.scooter.vehicle.walkGeometry} />}
+          {s.scooter.endSpot && <StreetWalk from={s.scooter.endSpot.pos} to={to} />}
           <Polyline positions={s.scooter.geometry} pathOptions={{ ...casing(light), weight: 9 }} />
           <Polyline positions={s.scooter.geometry} pathOptions={{ color: MODE_META.scooter.color, weight: 5, opacity: 1 }} />
           {s.scooter.vehicle && (
