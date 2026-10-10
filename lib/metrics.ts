@@ -74,6 +74,8 @@ export type Settings = {
   scooterPerMin: number;
   /** Car + second leg: the ways the user accepts to continue from where the car is left. */
   hybridModes: SecondKind[];
+  /** "Mano transportas": the ways the user is willing to travel at all (and combine). */
+  travel: TravelKind[];
   /** EV: prefer leaving the car at a charger when it stands for long. */
   chargeWhenParked: boolean;
 };
@@ -99,8 +101,14 @@ export const DEFAULT_SETTINGS: Settings = {
   scooterUnlock: 0.5,
   scooterPerMin: 0.15,
   hybridModes: ["transit", "bikeshare", "scooter"],
+  travel: ["car", "transit", "bike", "scooter", "walk"],
   chargeWhenParked: true,
 };
+
+export type TravelKind = "car" | "transit" | "bike" | "scooter" | "walk";
+export const TRAVEL_KINDS: TravelKind[] = ["car", "transit", "bike", "scooter", "walk"];
+/** Which "Mano transportas" choice a mode or a second leg belongs to (Cyclocity is a bike). */
+export const TRAVEL_OF: Record<ModeId | SecondKind, TravelKind> = { car: "car", transit: "transit", bikeshare: "bike", bike: "bike", scooter: "scooter", walk: "walk" };
 
 /** Charging points are shown and counted only for cars that can use them. */
 export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybrid" && s.plugIn);

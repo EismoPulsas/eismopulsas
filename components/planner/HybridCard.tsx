@@ -100,9 +100,12 @@ export function HybridCard({
   open,
   sig,
   onSelect,
+  details = true,
 }: {
   plan: PlanResponse;
   h: HybridSummary;
+  /** false: the chosen combination is shown in the trip card instead. */
+  details?: boolean;
   /** The car-only option, for "what this saves". */
   car: ModeSummary | undefined;
   isBest: boolean;
@@ -146,7 +149,7 @@ export function HybridCard({
         <Metric icon={<CoinIcon />} value={h.cost < 0.005 ? "0 €" : fmtEur(h.cost)} signal={sig.cost.get(h.id)} label="Kaina (su grįžimu iki automobilio)" />
         <Metric icon={<LeafIcon />} value={h.co2 < 0.001 ? "0 g" : fmtCo2(h.co2)} signal={sig.co2.get(h.id)} label="CO₂" />
       </div>
-      {open && <HybridDetails plan={plan} h={h} car={car} />}
+      {open && details && <HybridDetails plan={plan} h={h} car={car} />}
     </div>
   );
 }
@@ -219,6 +222,16 @@ function HybridDetails({ plan, h, car }: { plan: PlanResponse; h: HybridSummary;
         </div>
       )}
 
+      <HybridExtras h={h} car={car} />
+    </div>
+  );
+}
+
+/** Price breakdown, the comparison with driving all the way and the assumptions. */
+export function HybridExtras({ h, car }: { h: HybridSummary; car: ModeSummary | undefined }) {
+  const o = h.hybrid;
+  return (
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1 rounded-xl bg-[var(--chip)] p-2.5">
         {h.costLines.map((l, i) => (
           <Row
