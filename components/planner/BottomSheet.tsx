@@ -91,7 +91,7 @@ export function BottomSheet({
   return (
     <section
       aria-label="Rezultatai"
-      className="sheet pointer-events-auto fixed inset-x-0 bottom-0 z-[1050] flex flex-col rounded-t-3xl border-t border-[var(--line)] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] lg:static lg:z-auto lg:flex-1 lg:rounded-none lg:border-0 lg:shadow-none"
+      className="sheet pointer-events-auto fixed inset-x-0 bottom-0 z-[1050] flex flex-col rounded-t-3xl border-t border-[var(--line)] shadow-[0_-12px_40px_rgba(15,23,42,0.18)] lg:static lg:z-auto lg:flex-1 lg:rounded-none lg:border-0 lg:shadow-none"
       style={
         {
           "--sheet-h": `${height}px`,

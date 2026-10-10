@@ -1,22 +1,23 @@
 @import "tailwindcss";
 
-/* Eismo Pulsas: night asphalt, road markings and traffic-light signals. */
+/* Eismo Pulsas: light cards over the map, green for the recommended way, traffic-light signals. */
 :root {
-  color-scheme: dark;
-  --bg: #0c0e12;
-  --asphalt: #15181e;
-  --panel: #171a21;
-  --chip: #20242d;
-  --line: #2a2f3a;
-  --ink: #eef1f6;
-  --muted: #8f98aa;
-  --marking: #ffd23f; /* yellow road marking */
-  --go: #2fd17c; /* green light */
-  --wait: #ffb020; /* amber light */
-  --stop: #ff4d5e; /* red light */
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --asphalt: #ffffff;
+  --panel: #ffffff;
+  --chip: #f1f4f7;
+  --line: #e4e8ee;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --marking: #059669; /* accent: the recommended way */
+  --accent-soft: #ecfdf5;
+  --go: #10b981; /* green light */
+  --wait: #f59e0b; /* amber light */
+  --stop: #ef4444; /* red light */
   --sign-blue: #2f6fdf; /* Lithuanian information sign blue */
-  --sign-green: #15803d; /* motorway sign green */
-  --lane: #34d399; /* A lane */
+  --sign-green: #059669;
+  --lane: #10b981; /* A lane */
   --car: #ff5d6c;
   --transit: #4b8bff;
   --bike: #ffc53d;
@@ -26,6 +27,7 @@
 @theme inline {
   --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-display: var(--font-display-face), var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-mono-face), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 html,
@@ -47,6 +49,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Small uppercase section titles. */
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* ---------------------------------------------------------- road motifs */
 
 /* Dashed centre line, used as a divider. */
@@ -63,20 +74,14 @@ body {
   opacity: 0.6;
 }
 
-/* Asphalt texture for the side panel. */
+/* Page background behind the planner. */
 .asphalt {
-  background-color: var(--asphalt);
-  background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), radial-gradient(rgba(0, 0, 0, 0.25) 1px, transparent 1px);
-  background-size: 7px 7px, 11px 11px;
-  background-position: 0 0, 3px 5px;
+  background-color: var(--bg);
 }
 
 @media (min-width: 1024px) {
   .asphalt-lg {
-    background-color: var(--asphalt);
-    background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), radial-gradient(rgba(0, 0, 0, 0.25) 1px, transparent 1px);
-    background-size: 7px 7px, 11px 11px;
-    background-position: 0 0, 3px 5px;
+    background-color: var(--panel);
   }
 }
 
@@ -109,7 +114,7 @@ body {
   color: #fff;
   border-radius: 14px;
   padding: 3px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
 }
 .road-sign > .road-sign-inner {
   border: 2px solid rgba(255, 255, 255, 0.92);
@@ -131,9 +136,9 @@ body {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.signal.go { background: var(--go); box-shadow: 0 0 8px var(--go); }
-.signal.wait { background: var(--wait); box-shadow: 0 0 8px var(--wait); }
-.signal.stop { background: var(--stop); box-shadow: 0 0 8px var(--stop); }
+.signal.go { background: var(--go); }
+.signal.wait { background: var(--wait); }
+.signal.stop { background: var(--stop); }
 
 /* Traffic light loader. */
 .traffic-light {
@@ -214,9 +219,10 @@ body {
   white-space: nowrap;
 }
 .seg > button[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--panel);
+  color: var(--ink);
   font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12), 0 0 0 1px var(--line);
 }
 
 /* ---------------------------------------------------------- phone layout */
@@ -224,7 +230,7 @@ body {
   .sheet {
     height: var(--sheet-h);
     transform: translateY(var(--sheet-y));
-    background-color: var(--asphalt);
+    background-color: var(--panel);
     will-change: transform;
   }
   .sheet-body {
@@ -240,8 +246,8 @@ body {
 
 /* ---------------------------------------------------------- leaflet */
 .leaflet-container.leaflet-container {
-  /* Same as the OpenFreeMap dark style's background, so the map never flashes while loading. */
-  background: #0c0c0c;
+  /* Same as the default (Positron) map style's background, so the map never flashes while loading. */
+  background: #f2f3f0;
   font-family: var(--font-sans);
 }
 .ep-picking .leaflet-container {
@@ -254,11 +260,23 @@ body {
   border-color: var(--line) !important;
 }
 .leaflet-control-attribution {
-  background: rgba(12, 14, 18, 0.8) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   color: var(--muted) !important;
+  border-radius: 8px 0 0 0;
 }
 .leaflet-control-attribution a {
-  color: #b9c3d8 !important;
+  color: var(--ink) !important;
+}
+.leaflet-bar {
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12) !important;
+}
+.leaflet-bar a {
+  width: 40px !important;
+  height: 40px !important;
+  line-height: 40px !important;
 }
 
 .ep-tooltip {
@@ -266,7 +284,7 @@ body {
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
   padding: 6px 10px;
 }
 .ep-tooltip::before {
@@ -305,34 +323,53 @@ body {
   border-radius: 2px;
 }
 
-/* Car park plate: a blue "P" sign; the coloured edge says free / paid / P+R, the number is live free spaces. */
-.ep-lot {
+/* Map markers share one look: a white pill, a coloured icon disc (the status colour) and a number. */
+.ep-mk {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--sign-blue);
-  color: #fff;
-  box-shadow: 0 0 0 2px var(--c, #fff), 0 4px 10px rgba(0, 0, 0, 0.45);
-  font: 800 13px/1 var(--font-display);
-  white-space: nowrap;
-}
-.ep-lot > b {
-  display: grid;
-  place-items: center;
-  width: 22px;
-}
-.ep-lot > span {
-  padding: 0 6px 0 2px;
+  gap: 4px;
+  height: 24px;
+  padding: 2px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.18);
   font: 700 12px/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.ep-lot-chosen {
-  height: 26px;
-  box-shadow: 0 0 0 3px var(--marking), 0 6px 14px rgba(0, 0, 0, 0.5);
+.ep-mk > i {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--c);
+  color: #fff;
+  font: 800 12px/1 var(--font-display);
+  font-style: normal;
 }
-.ep-lot-chosen > b {
-  width: 26px;
+.ep-mk > b {
+  padding-right: 5px;
+}
+/* Square icon for car parks: reads as a "P" sign. */
+.ep-mk.sq > i {
+  border-radius: 6px;
+}
+.ep-mk.chosen {
+  box-shadow: 0 0 0 3px var(--marking), 0 4px 12px rgba(15, 23, 42, 0.3);
+}
+.ep-mk.off {
+  opacity: 0.75;
+}
+/* Small status dot for things hidden behind a neighbour or far from the trip. */
+.ep-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgba(15, 23, 42, 0.35);
 }
 
 /* Transit stop dot on the map. */
