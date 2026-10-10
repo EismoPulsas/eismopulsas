@@ -17,7 +17,13 @@ const SOURCES = [
     name: "Orų prognozė",
     who: "Lietuvos hidrometeorologijos tarnyba (Meteo.lt), CC BY-SA 4.0",
     url: "https://api.meteo.lt/",
-    use: "Perspėjimai maršruto pradžioje, viduryje ir pabaigoje, pagal kelionės laiką. Prognozė nekeičia važiavimo trukmės.",
+    use: "Perspėjimai maršruto pradžioje, viduryje ir pabaigoje, pagal kelionės laiką; orai kelionės pradžioje (temperatūra, krituliai, vėjas). Prognozė nekeičia važiavimo trukmės.",
+  },
+  {
+    name: "Lietaus tikimybė",
+    who: "Open-Meteo, CC BY 4.0",
+    url: "https://open-meteo.com/",
+    use: "Kritulių tikimybė kelionės valandomis – Meteo.lt jos neskelbia. Naudojama sprendžiant, ar rekomenduoti dviratį ir paspirtuką.",
   },
   {
     name: "Viešojo transporto tvarkaraščiai (GTFS)",
@@ -74,10 +80,16 @@ const SOURCES = [
     use: "Visos Lietuvos įkrovimo vietos: jungtys, galia, kainos ir gyva būsena (OCPI 2.3.0).",
   },
   {
+    name: "Dviračio ir pėsčiųjų maršrutai",
+    who: "Valhalla (FOSSGIS) pagal OpenStreetMap",
+    url: "https://valhalla1.openstreetmap.de/",
+    use: "Dviračio, paspirtuko ir pėsčiųjų maršrutai – renkasi dviračių takus ir nedaro lankų.",
+  },
+  {
     name: "Gatvių maršrutai",
     who: "OSRM (FOSSGIS) pagal OpenStreetMap",
     url: "https://routing.openstreetmap.de/",
-    use: "Dviračio, pėsčiųjų ir atsarginiai automobilio maršrutai bei pradinis važiavimo laikas.",
+    use: "Ėjimas iki stotelių ir tarp jų, atsarginiai dviračio, pėsčiųjų ir automobilio maršrutai.",
   },
   {
     name: "Adresų paieška",
@@ -139,6 +151,12 @@ export default function About() {
               Eismas tikrinamas skaičiuojant maršrutą arba paspaudus „Atnaujinti eismą“. Kortelėje rodome šaltinį, skaičiavimo laiką ir duomenų ribotumą.
             </li>
             <li>
+              <b>Orai ir dviratis / paspirtukas:</b> tikriname orus A taške kelionės valandomis. Jei lietaus tikimybė ≥ 60 %, prognozuojamas lietus,
+              šlapdriba ar sniegas, kritulių ≥ 0,5 mm/val., vėjo gūsiai ≥ 15 m/s ar slidu (≤ 0 °C su krituliais) – dviratis, Cyclocity ir paspirtukas
+              lieka sąraše, bet nebūna rekomenduojami („Nerekomenduojama: …“). Jei kitų būdų nėra, rekomenduojamas vis tiek greičiausias iš jų.
+              Tikimybė 30–60 %, nedidelis lietus, gūsiai ≥ 11 m/s ar ≤ 2 °C – perspėjame „atsargiai“, bet rekomendacijos nekeičiame.
+            </li>
+            <li>
               <b>Waze:</b> „Atidaryti Waze“ parodo Waze žemėlapį su abiem automobilio atkarpos taškais – išvykimo vieta ir tikslu (pasirinktu parkavimu).
               „Naviguoti nuo mano vietos“ atidaro navigaciją į tą patį tikslą nuo dabartinės jūsų vietos. Waze parenka savo maršrutą, kuris gali skirtis nuo mūsų žemėlapyje rodomo kelio.
             </li>
@@ -160,7 +178,12 @@ export default function About() {
               rodomi aiškiai pažymėti <b>DEMO</b> paspirtukai, o tikrojoje – vertinimas (≈ 3 min. rasti paspirtuką).
             </li>
             <li>
-              <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
+              <b>Dviratis ir pėsčiomis:</b> Valhalla dviračio („hibridinis“ dviratis, renkasi dviračių takus ir ramesnes gatves) ir pėsčiųjų maršrutai; jei
+              Valhalla neatsako – OSRM. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
+            </li>
+            <li>
+              <b>Ėjimas iki stotelės, persėdimai, iki Cyclocity stotelės ar paspirtuko</b> – gatvėmis (OSRM pėsčiųjų profilis), ne tiesia linija. Jei kelias gatvėmis
+              ilgesnis, išeiti reikia anksčiau, o persėdimas, kurio nespėtumėte ramiai nueiti, pažymimas.
             </li>
           </ul>
         </section>
@@ -263,6 +286,8 @@ GET /api/drive?from=54.7329,25.2236&to=54.6800,25.2800&depart=2026-10-12T05:02:0
 GET /api/traffic          # gyvi Via Lietuva jutikliai
 GET /api/bikeshare        # Cyclocity stotelės realiu laiku
 GET /api/scooters?bbox=…  # paspirtukai (GBFS arba DEMO)
+GET /api/stops?bbox=…     # VT stotelės ir jų maršrutai
+GET /api/stops?id=…       # artimiausi išvykimai iš stotelės
 GET /api/geocode?q=Gedimino pr. 9, Vilnius`}
           </pre>
         </section>

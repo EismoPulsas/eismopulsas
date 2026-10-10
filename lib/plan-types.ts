@@ -218,6 +218,9 @@ export type BikeshareResult = {
   to: { name: string; pos: LatLng; docks: number | null };
   walkTo: number;
   walkFrom: number;
+  /** Street paths A → first station and last station → B. */
+  walkToGeometry?: LatLng[];
+  walkFromGeometry?: LatLng[];
   /** Ride distance between the stations. */
   ride: number;
   rideDuration: number;
@@ -237,7 +240,7 @@ export type ScooterResult = {
   source: "gbfs" | "demo" | "estimate";
   operator: string | null;
   /** The scooter we would take, if the fleet is known. */
-  vehicle: { id: string; pos: LatLng; battery: number | null; walk: number } | null;
+  vehicle: { id: string; pos: LatLng; battery: number | null; walk: number; walkGeometry?: LatLng[] } | null;
   distance: number;
   rideDuration: number;
   duration: number;
@@ -252,6 +255,10 @@ export type WalkLeg = {
   distance: number;
   start: number;
   end: number;
+  /** Street path; absent (or two points) when only the straight line is known. */
+  geometry?: LatLng[];
+  /** The walk along streets takes longer than the change allows. */
+  tight?: boolean;
 };
 
 export type RideLeg = {
@@ -285,6 +292,28 @@ export type TransitResult = {
   next: number | null;
 };
 
+/** Forecast for the start of the trip (Meteo.lt + Open-Meteo rain chance). */
+export type TripWeather = {
+  /** Meteo.lt forecast place the numbers come from. */
+  place: string | null;
+  /** Meteo.lt condition code (clear, light-rain, rain, snow…). */
+  condition: string | null;
+  label: string;
+  temp: number | null;
+  feelsLike: number | null;
+  /** m/s */
+  wind: number | null;
+  gust: number | null;
+  /** mm/h, the wettest hour of the trip */
+  precip: number;
+  /** %, highest during the trip */
+  rainChance: number | null;
+  /** "bad": do not recommend riding a bike or scooter. */
+  risk: "ok" | "caution" | "bad";
+  reasons: string[];
+  forecastCreatedAt: string | null;
+};
+
 export type PlanResponse = {
   from: LatLng;
   to: LatLng;
@@ -299,4 +328,5 @@ export type PlanResponse = {
   transit: TransitResult | null;
   transitNote: string | null;
   timetable: { built: string; window: string; shifted: boolean };
+  weather: TripWeather | null;
 };

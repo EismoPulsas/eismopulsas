@@ -362,6 +362,25 @@ function shapeOf(N: Net, i: number): LatLng[] | undefined {
   return (N.shapes[i] ??= decodePolyline(N.raw.shapes[i]));
 }
 
+/** Closest point to p on segments lo…hi-1 of a line (segment i runs from vertex i to i+1). */
+function project(line: LatLng[], p: LatLng, lo: number, hi: number): { seg: number; point: LatLng } {
+  const kx = Math.cos((p[0] * Math.PI) / 180);
+  let best = { seg: lo, point: line[lo], d: Infinity };
+  for (let i = lo; i < Math.max(hi, lo + 1) && i + 1 < line.length; i++) {
+    const [ay, ax] = line[i];
+    const [by, bx] = line[i + 1];
+    const dx = (bx - ax) * kx;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? (((p[1] - ax) * kx) * dx + (p[0] - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const point: LatLng = [ay + t * (by - ay), ax + t * (bx - ax)];
+    const d = ((point[0] - p[0]) ** 2) + ((point[1] - p[1]) * kx) ** 2;
+    if (d < best.d) best = { seg: i, point, d };
+  }
+  return { seg: best.seg, point: best.point };
+}
+
 function rideLeg(N: Net, lab: Extract<Label, { ride: true }>): RideLeg {
   const p = N.patterns[lab.pattern];
   const r = N.raw.routes[p.route];
@@ -373,8 +392,13 @@ function rideLeg(N: Net, lab: Extract<Label, { ride: true }>): RideLeg {
   const shape = shapeOf(N, p.shape);
   let geometry: LatLng[];
   if (shape && p.cut) {
-    geometry = shape.slice(p.cut[lab.board], p.cut[lab.alight] + 1);
-    geometry = [stopPos(N, fromStop), ...geometry, stopPos(N, toStop)];
+    // Cut the line exactly where the stops project onto it. Cutting at the nearest
+    // vertex can overshoot a stop and draw a spur out and back.
+    const cb = p.cut[lab.board];
+    const ca = p.cut[lab.alight];
+    const a = project(shape, stopPos(N, fromStop), Math.max(0, cb - 2), Math.min(shape.length - 1, cb + 2));
+    const b = project(shape, stopPos(N, toStop), Math.max(a.seg, ca - 2), Math.min(shape.length - 1, ca + 2));
+    geometry = b.seg > a.seg ? [a.point, ...shape.slice(a.seg + 1, b.seg + 1), b.point] : [a.point, b.point];
   } else {
     geometry = [];
     for (let i = lab.board; i <= lab.alight; i++) geometry.push(stopPos(N, p.stops[i]));
@@ -484,4 +508,52 @@ export function stopsWithin(c: LatLng, radius: number): LatLng[] {
     .near(c, radius)
     .map((s) => stopPos(N, s))
     .filter((p) => haversine(c, p) <= radius);
+}
+
+export type StopInfo = { id: number; name: string; pos: LatLng; routes: { short: string; color: string; type: number }[] };
+
+/** Stops inside a box, with the routes that call there (for the map layer). */
+export function stopsInBox(s: number, w: number, n: number, e: number, limit: number): StopInfo[] {
+  const N = load();
+  const out: StopInfo[] = [];
+  for (let i = 0; i < N.lat.length && out.length < limit; i++) {
+    if (N.lat[i] < s || N.lat[i] > n || N.lng[i] < w || N.lng[i] > e) continue;
+    const seen = new Set<number>();
+    const routes: StopInfo["routes"] = [];
+    for (const [pi, pos] of N.stopPatterns[i]) {
+      const p = N.patterns[pi];
+      if (pos === p.stops.length - 1 || seen.has(p.route)) continue; // only boarding
+      seen.add(p.route);
+      const r = N.raw.routes[p.route];
+      routes.push({ short: r[0] || "?", color: r[3], type: r[2] });
+    }
+    if (!routes.length) continue;
+    routes.sort((a, b) => a.short.localeCompare(b.short, "lt", { numeric: true }));
+    out.push({ id: i, name: N.raw.stops.name[i], pos: stopPos(N, i), routes });
+  }
+  return out;
+}
+
+export type Departure = { route: string; color: string; type: number; headsign: string; time: number };
+
+/** Next departures from a stop, from `sec` (local seconds) on `date`, within `windowSec`. */
+export function departuresFrom(stop: number, date: string, sec: number, limit = 8, windowSec = 2 * 3600): { name: string; departures: Departure[] } | null {
+  const N = load();
+  if (!Number.isInteger(stop) || stop < 0 || stop >= N.lat.length) return null;
+  const { day } = resolveDay(date);
+  const ctx = dayContext(N, day);
+  const out: Departure[] = [];
+  for (const [pi, pos] of N.stopPatterns[stop]) {
+    const p = N.patterns[pi];
+    if (pos === p.stops.length - 1) continue; // arrivals only, nobody boards at the terminus
+    const r = N.raw.routes[p.route];
+    for (const { shift, active } of ctx)
+      for (let k = 0; k < p.start.length; k++) {
+        if (!active[p.svc[k]]) continue;
+        const t = p.start[k] + p.dep[p.prof[k]][pos] + shift;
+        if (t >= sec && t <= sec + windowSec) out.push({ route: r[0] || "?", color: r[3], type: r[2], headsign: p.headsign, time: t });
+      }
+  }
+  out.sort((a, b) => a.time - b.time);
+  return { name: N.raw.stops.name[stop], departures: out.slice(0, limit) };
 }

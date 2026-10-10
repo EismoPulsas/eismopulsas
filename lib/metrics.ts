@@ -114,6 +114,8 @@ export type ModeSummary = {
   kcal: number;
   feasible: boolean;
   why?: string;
+  /** Possible, but the weather says no (rain, ice, gale): never picked as best. */
+  weatherWarning?: string;
   /** Car: where it is left at B. */
   parking?: ParkingEval | null;
 };
@@ -451,6 +453,13 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
       why: w.duration > 50 * 60 ? "Per toli eiti pėsčiomis" : undefined,
     });
   }
+
+  // Rain, ice or a gale: riding a bike or scooter is not recommended.
+  const wx = plan.weather;
+  if (wx?.risk === "bad") {
+    const why = `Nerekomenduojama: ${wx.reasons.join(", ")}`;
+    for (const m of out) if (m.id === "bike" || m.id === "bikeshare" || m.id === "scooter") m.weatherWarning = why;
+  }
   return out;
 }
 
@@ -463,7 +472,10 @@ const WEIGHTS: Record<Priority, { time: number; cost: number; co2: number }> = {
 
 /** Weighted score per mode (0 = best on everything); the lowest feasible one wins. */
 export function rank(modes: ModeSummary[], p: Priority): { best: ModeId | null; scores: Map<ModeId, number> } {
-  const ok = modes.filter((m) => m.feasible);
+  const feasible = modes.filter((m) => m.feasible);
+  // Bad weather rules riding out, unless nothing else is left.
+  const dry = feasible.filter((m) => !m.weatherWarning);
+  const ok = dry.length ? dry : feasible;
   const scores = new Map<ModeId, number>();
   if (!ok.length) return { best: null, scores };
   const norm = (key: "duration" | "cost" | "co2", v: number) => {

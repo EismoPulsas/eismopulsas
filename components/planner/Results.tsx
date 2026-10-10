@@ -25,6 +25,114 @@ export function signals(modes: ModeSummary[], key: "duration" | "cost" | "co2"):
   return out;
 }
 
+export function ModeList({
+  plan,
+  modes,
+  best,
+  selected,
+  onSelect,
+  parking,
+}: {
+  plan: PlanResponse;
+  modes: ModeSummary[];
+  best: ModeId | null;
+  selected: ModeId | null;
+  onSelect: (m: ModeId) => void;
+  parking: ParkingChoiceProps;
+}) {
+  const sig = { duration: signals(modes, "duration"), cost: signals(modes, "cost"), co2: signals(modes, "co2") };
+  const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
+  const sorted = [...modes].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {sorted.map((m) => (
+        <ModeCard key={m.id} plan={plan} mode={m} isBest={m.id === best} open={m.id === selected} sig={sig} onSelect={() => onSelect(m.id)} parking={parking} />
+      ))}
+      {!plan.transit && plan.transitNote && (
+        <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[var(--line)] p-3 text-sm text-[var(--muted)]">
+          <ModeBadge mode="transit" size={32} />
+          {plan.transitNote}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ icon, value, signal, label }: { icon: React.ReactNode; value: string; signal?: Signal; label: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5" title={label}>
+      {signal ? <span className={`signal ${signal}`} aria-hidden /> : <span className="w-2" />}
+      <span className="hidden text-[var(--muted)] sm:inline">{icon}</span>
+      <span className="tnum truncate text-sm font-semibold">{value}</span>
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
+function ModeCard({
+  plan,
+  mode: m,
+  isBest,
+  open,
+  sig,
+  onSelect,
+  parking,
+}: {
+  plan: PlanResponse;
+  mode: ModeSummary;
+  isBest: boolean;
+  open: boolean;
+  sig: Record<"duration" | "cost" | "co2", Map<ModeId, Signal>>;
+  onSelect: () => void;
+  parking: ParkingChoiceProps;
+}) {
+  const meta = MODE_META[m.id];
+  // A part of the price we could not work out: the total is a lower bound.
+  const partial = m.costLines.some((l) => l.unknown);
+  const waiting = m.id === "car" && (parking.updating || !!parking.error);
+  const sub =
+    m.id === "transit" && plan.transit
+      ? `Išeiti ${fmtClock(plan.transit.leave)} · atvyksite ${fmtClock(plan.transit.arrive)}`
+      : `${fmtKm(m.distance)}${m.id === "car" && plan.car ? ` · atvyksite ${fmtClock(localParts(Date.parse(plan.depart.at) + m.duration * 1000).sec)}` : ""}`;
+
+  return (
+    <div
+      className={`overflow-hidden rounded-2xl border transition ${open ? "bg-[var(--panel)]" : "bg-[var(--panel)]/70 hover:bg-[var(--panel)]"} ${m.feasible ? "" : "opacity-60"}`}
+      style={{ borderColor: open ? meta.color : "var(--line)" }}
+    >
+      <button type="button" onClick={onSelect} className="flex w-full items-center gap-3 p-3 text-left" aria-expanded={open}>
+        <ModeBadge mode={m.id} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="font-display text-[15px] font-semibold">{meta.short}</span>
+            {m.id === "scooter" && plan.scooter?.source === "demo" && (
+              <span className="rounded bg-[#f472b6] px-1 text-[10px] font-bold text-black">DEMO</span>
+            )}
+            {isBest && (
+              <span className="rounded-md bg-[var(--sign-green)] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase ring-1 ring-white/80">
+                Geriausia
+              </span>
+            )}
+          </div>
+          <div className="truncate text-xs text-[var(--muted)]">{m.feasible ? sub : m.why}</div>
+          {m.weatherWarning && <div className="mt-0.5 truncate text-xs font-medium text-[var(--stop)]">{m.weatherWarning}</div>}
+        </div>
+        <div className="hidden shrink-0 text-right sm:block">
+          <div className="tnum font-display text-xl leading-none font-bold">{waiting ? "—" : fmtDur(m.duration)}</div>
+        </div>
+        <ChevronIcon className={`shrink-0 text-[var(--muted)] transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      <div className="grid grid-cols-3 gap-2 border-t border-[var(--line)]/70 px-3 py-2">
+        <Metric icon={<ClockIcon />} value={waiting ? "—" : fmtDurShort(m.duration)} signal={sig.duration.get(m.id)} label="Laikas" />
+        <Metric icon={<CoinIcon />} value={waiting ? "—" : `${partial ? "≥ " : ""}${m.cost < 0.005 ? "0 €" : fmtEur(m.cost)}`} signal={sig.cost.get(m.id)} label="Kaina" />
+        <Metric icon={<LeafIcon />} value={waiting ? "—" : m.co2 < 0.001 ? "0 g" : fmtCo2(m.co2)} signal={sig.co2.get(m.id)} label="CO₂" />
+      </div>
+      {open && <Details plan={plan} mode={m} parking={parking} />}
+    </div>
+  );
+}
+
 function Row({ label, value, muted }: { label: React.ReactNode; value: React.ReactNode; muted?: boolean }) {
   return (
     <div className={`flex items-baseline justify-between gap-3 text-sm ${muted ? "text-[var(--muted)]" : ""}`}>
@@ -209,6 +317,67 @@ export function TransitSummary({ t }: { t: TransitResult }) {
         <span>
           Išeiti {fmtClock(t.leave)} · atvyksite {fmtClock(t.arrive)}
         </span>
+      <ol className="relative flex flex-col">
+        {t.legs.map((l, i) => (
+          <li key={i} className="relative flex gap-3 pb-3 last:pb-0">
+            <div className="flex w-12 shrink-0 flex-col items-end pt-0.5">
+              <span className="tnum text-xs font-semibold">{fmtClock(l.kind === "ride" ? l.dep : l.start)}</span>
+            </div>
+            <div className="relative flex w-4 shrink-0 justify-center">
+              {l.kind === "ride" ? (
+                <span className="absolute top-1 bottom-[-4px] w-1.5 rounded-full" style={{ background: l.route.color || "var(--transit)" }} />
+              ) : (
+                <span className="lane-vertical absolute top-1 bottom-[-4px]" />
+              )}
+              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white bg-[var(--panel)]" />
+            </div>
+            <div className="min-w-0 flex-1 pb-1">
+              {l.kind === "walk" ? (
+                <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+                  <WalkIcon size={15} />
+                  Eiti {fmtKm(l.distance)} · {fmtDur(l.end - l.start)}
+                  {l.toName && <span className="truncate">iki „{l.toName}“</span>}
+                  {l.tight && <span className="shrink-0 font-medium text-[var(--wait)]">· persėsti spėsite tik paskubėję</span>}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-bold text-white"
+                      style={{ background: l.route.color || "var(--transit)" }}
+                    >
+                      <RideIcon leg={l} />
+                      {l.route.short || ROUTE_TYPE[l.route.type]}
+                    </span>
+                    <span className="truncate text-sm">→ {l.headsign || l.route.long}</span>
+                  </div>
+                  <div className="text-sm">
+                    <b>{l.from.name}</b> <span className="text-[var(--muted)]">→</span> <b>{l.to.name}</b>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-[var(--muted)]">
+                    <span>
+                      {l.stops} st. · {fmtDur(l.arr - l.dep)} · {fmtKm(l.distance)}
+                    </span>
+                    <span>išlipti {fmtClock(l.arr)}</span>
+                    {l.laneMeters > 100 && <span className="text-[var(--lane)]">A juosta {fmtKm(l.laneMeters)}</span>}
+                  </div>
+                  <div className="text-[11px] text-[var(--muted)]/80">{l.route.agency}</div>
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+        <li className="flex gap-3">
+          <div className="flex w-12 shrink-0 justify-end">
+            <span className="tnum text-xs font-semibold">{fmtClock(t.arrive)}</span>
+          </div>
+          <div className="flex w-4 justify-center">
+            <span className="h-3 w-3 rounded-full bg-[#b4232f] ring-2 ring-white" />
+          </div>
+          <span className="text-sm font-semibold">Atvykimas</span>
+        </li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
         <span>{t.transfers ? `${t.transfers} persėdimas(-ai)` : "Be persėdimų"}</span>
         <span>Pėsčiomis {fmtKm(t.walkDistance)}</span>
         {t.next && <span>Kitas reisas – išeiti {fmtClock(t.next)}</span>}

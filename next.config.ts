@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     ],
     "/api/geocode": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
     "/api/scooters": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
+    "/api/stops": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
   },
 };
 

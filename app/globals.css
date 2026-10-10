@@ -291,6 +291,21 @@ body {
   display: none;
 }
 
+.ep-popup .leaflet-popup-content-wrapper,
+.ep-popup .leaflet-popup-tip {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.ep-popup .leaflet-popup-content {
+  margin: 12px 14px;
+  font: inherit;
+}
+.ep-popup a.leaflet-popup-close-button {
+  color: var(--muted);
+}
+
 /* A / B pins: round road-sign plates on a post. */
 .ep-pin {
   position: relative;

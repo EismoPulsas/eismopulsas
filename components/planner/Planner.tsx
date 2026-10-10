@@ -11,6 +11,12 @@ import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
 import { MODE_META } from "./format";
 import { ChevronIcon, GearIcon, SwapIcon } from "./icons";
+import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId, type ModeSummary } from "@/lib/metrics";
+import type { PlanResponse, TripWeather } from "@/lib/plan-types";
+import { Logo } from "../Logo";
+import { BottomSheet, type Snap } from "./BottomSheet";
+import { fmtDurShort, fmtEur, MODE_META, MODE_TAB } from "./format";
+import { ChevronIcon, GearIcon, LayersIcon, ModeBadge, SwapIcon } from "./icons";
 import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
 import { ParkingCard } from "./ParkingCard";
@@ -25,6 +31,7 @@ import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps, W
 
 /** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
 const PANEL_LEFT = 24 + 560;
+import { WeatherCard, WeatherChip, WeatherIcon } from "./Weather";
 
 // Leaflet needs `window`, so the map only loads in the browser.
 const MapView = dynamic(() => import("./MapView"), {
@@ -75,7 +82,7 @@ export default function Planner() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ModeId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false });
+  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false, stops: true });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /** Where the car option leaves the car; null = the best one for the priority. */
@@ -297,6 +304,10 @@ export default function Planner() {
             style={{ top: (phone ? topPx : 0) + 60, left: phone ? "50%" : `calc(50% + ${PANEL_LEFT / 2}px)` }}
           >
             {notice}
+        <LayerToggles layers={layers} onChange={setLayers} ev={ev} top={phone ? topPx : 0} />
+        {plan?.weather && (
+          <div className="absolute left-2 z-[500] lg:top-3 lg:left-3" style={{ top: phone ? topPx + 8 : undefined }}>
+            <WeatherChip w={plan.weather} />
           </div>
         )}
         {picked && (
@@ -470,6 +481,8 @@ export default function Planner() {
                     </span>
                   )}
                 </div>
+                {plan.weather && <WeatherCard w={plan.weather} />}
+                <ModeStrip modes={modes} best={best} selected={selected} onSelect={selectMode} weather={plan.weather} />
 
                 <div className="flex items-center gap-2">
                   <div className="seg flex-1" role="group" aria-label="Kas svarbiausia?">
@@ -553,6 +566,99 @@ export default function Planner() {
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+/** One chip per mode: the whole comparison at a glance (the only thing visible when the sheet is low). */
+function ModeStrip({
+  modes,
+  best,
+  selected,
+  onSelect,
+  weather,
+}: {
+  modes: ModeSummary[];
+  best: ModeId | null;
+  selected: ModeId | null;
+  onSelect: (m: ModeId) => void;
+  weather: TripWeather | null;
+}) {
+  const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
+  const sorted = [...modes].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  return (
+    <div className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] lg:hidden">
+      {sorted.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          onClick={() => onSelect(m.id)}
+          aria-pressed={selected === m.id}
+          className={`relative flex shrink-0 snap-start items-center gap-2 rounded-2xl border px-2.5 py-2 text-left ${m.feasible && !m.weatherWarning ? "" : "opacity-50"}`}
+          style={{ borderColor: selected === m.id ? MODE_META[m.id].color : "var(--line)", background: "var(--panel)" }}
+        >
+          <ModeBadge mode={m.id} size={30} />
+          <span>
+            <span className="tnum block font-display text-[15px] leading-tight font-bold">{fmtDurShort(m.duration)}</span>
+            <span className="tnum block text-[11px] text-[var(--muted)]">
+              {m.cost < 0.005 ? "0 €" : fmtEur(m.cost)} · {MODE_TAB[m.id]}
+            </span>
+          </span>
+          {m.id === best && <span className="absolute -top-1.5 right-2 rounded bg-[var(--sign-green)] px-1 text-[9px] font-bold text-white uppercase ring-1 ring-white/80">Geriausia</span>}
+          {m.weatherWarning && weather && (
+            <span className="absolute -top-1.5 right-2 grid h-5 w-5 place-items-center rounded-full bg-[var(--stop)] text-white ring-1 ring-white/80" title={m.weatherWarning}>
+              <WeatherIcon w={weather} size={12} />
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LayerToggles({ layers, onChange, ev, top }: { layers: Layers; onChange: (l: Layers) => void; ev: boolean; top: number }) {
+  const [open, setOpen] = useState(false);
+  const items: { id: keyof Layers; label: string; swatch: string }[] = [
+    { id: "lanes", label: "A juostos", swatch: "var(--lane)" },
+    { id: "stops", label: "VT stotelės", swatch: "#4b8bff" },
+    { id: "traffic", label: "Gyvas eismas", swatch: "var(--wait)" },
+    { id: "parking", label: "Parkavimas", swatch: "var(--sign-blue)" },
+    // Charging points exist on the map only for cars that can use them.
+    ...(ev ? [{ id: "charging" as const, label: "Įkrovimas", swatch: "#22d3ee" }] : []),
+    { id: "bikeshare", label: "Cyclocity dviračiai", swatch: "#22d3ee" },
+    { id: "scooters", label: "Paspirtukai", swatch: "#f472b6" },
+  ];
+  const on = items.filter((it) => layers[it.id]).length;
+  return (
+    <div className="absolute right-2 z-[500] flex flex-col items-end gap-1.5 lg:top-3 lg:right-3" style={{ top: top ? top + 8 : undefined }}>
+      {/* Phones: one button that unfolds the list, so it never runs under the results sheet. */}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex min-h-9 items-center gap-2 rounded-full border border-white/30 bg-[var(--panel)]/95 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur lg:hidden"
+      >
+        <LayersIcon size={15} />
+        Sluoksniai{on ? ` · ${on}` : ""}
+      </button>
+      <div className={`${open ? "flex" : "hidden"} flex-col items-end gap-1.5 lg:flex`}>
+        {items.map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            aria-pressed={layers[it.id]}
+            aria-label={it.label}
+            title={it.label}
+            onClick={() => onChange({ ...layers, [it.id]: !layers[it.id] })}
+            className={`flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur transition ${
+              layers[it.id] ? "border-white/30 bg-[var(--panel)]/95 text-[var(--ink)]" : "border-[var(--line)] bg-[var(--bg)]/80 text-[var(--muted)]"
+            }`}
+          >
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: layers[it.id] ? it.swatch : "transparent", boxShadow: `inset 0 0 0 2px ${it.swatch}` }} />
+            {it.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
