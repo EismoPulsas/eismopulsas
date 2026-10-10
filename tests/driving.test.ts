@@ -194,7 +194,7 @@ function planFixture(): PlanResponse {
     overhead: 300, distance: drive.distance, geometry: drive.geometry, parking: null, arrive: 8 * 3600 + 1200,
     parkingOptions: [{ kind: "lot", id: "parking", name: "Aikštelė", pos: [54.68, 25.28], walk: 390,
       lot: { id: "parking", src: "judu", name: "Aikštelė", addr: null, city: "Vilnius", pos: [54.68, 25.28], access: "public", cap: 100, gated: true, t: { known: true, free: true, text: ["Nemokama"] } } }] },
-    bike: null, walk: null, bikeshare: null, bikeshareNote: null, scooter: null, transit: null, transitNote: null, timetable: { built: "", window: "", shifted: false } };
+    bike: null, walk: null, bikeshare: null, bikeshareNote: null, scooter: null, transit: null, transitNote: null, timetable: { built: "", window: "", shifted: false }, weather: null };
 }
 
 test("selected parking leg drives ETA, geometry, fuel/CO2 and Waze to the same destination", () => {

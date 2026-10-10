@@ -19,6 +19,9 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 - **Paspirtukai:** žemėlapio sluoksnis ir maršrutas iki artimiausio paspirtuko. Tikrų duomenų kol kas nėra (Bolt ir kt.
   Lietuvoje atvirų GBFS neskelbia), todėl preview aplinkoje rodomi aiškiai pažymėti **DEMO** duomenys – žr. „Paspirtukų duomenys“
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
+- **Orai:** Meteo.lt prognozė ir Open-Meteo lietaus tikimybė kelionės pradžioje – kortelė rezultatuose ir žymė žemėlapyje.
+  Esant lietui, sniegui, slidžiai dangai ar stipriam vėjui dviratis ir paspirtukas nerekomenduojami (lieka sąraše su perspėjimu)
+- **VT stotelės žemėlapyje:** priartinus matomos visos stotelės maršrutų spalvomis; užvedus – maršrutai, paspaudus – artimiausi išvykimai
 - **Telefone:** žemėlapis per visą ekraną, kompaktiška paieška viršuje, tempiamas rezultatų skydelis
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
 - **Parkavimas:** „Kur palikti automobilį“ – gatvė prie tikslo, stovėjimas gatvėse, aikštelės (JUDU, UNIPARK, prekybos centrai,
@@ -27,7 +30,7 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 - `/profilis`: automobilis (kuras, sąnaudos, kaina), elektromobilis (jungtys, AC/DC galia, baterija, JUDU leidimas), stovėjimo trukmė,
   didžiausias ėjimas, bilietai, prioritetas – saugoma tik naršyklėje
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
-- Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), Cyclocity stotelės, parkavimas (zonos, aikštelės su gyvu laisvų vietų skaičiumi, stovėjimas
+- Žemėlapio sluoksniai (telefone – po mygtuku „Sluoksniai“): A juostos, VT stotelės, gyvas eismas (eismoinfo.lt), Cyclocity stotelės, parkavimas (zonos, aikštelės su gyvu laisvų vietų skaičiumi, stovėjimas
   gatvėse ir draudžiamos zonos priartinus, kortelė su kainomis ir užimtumo grafiku), įkrovimas (tik elektromobiliams)
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
 
@@ -41,7 +44,8 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 | OpenStreetMap (Overpass) | autobusų juostos kituose miestuose |
 | [Via Lietuva – eismoinfo.lt](https://eismoinfo.lt/traffic-intensity-service) | gyvas vidutinis greitis kelių jutikliuose (kas 15 min.) |
 | [TomTom Orbis Routing API](https://docs.tomtom.com/routing-api/) | važiavimo maršrutas, trukmė su eismu, maršruto eismo sutrikimai |
-| [LHMT – Meteo.lt API](https://api.meteo.lt/) | orų prognozės maršruto pradžioje, viduryje ir pabaigoje; CC BY-SA 4.0 |
+| [LHMT – Meteo.lt API](https://api.meteo.lt/) | orų prognozės maršruto pradžioje, viduryje ir pabaigoje bei kelionės pradžioje; CC BY-SA 4.0 |
+| [Open-Meteo](https://open-meteo.com/) | lietaus tikimybė (Meteo.lt jos neskelbia); CC BY 4.0 |
 | [JUDU – rinkliavos zonos nuo 2025-07-01](https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/rinkliavos_zonos_2025_07/FeatureServer/5) | Vilniaus zonų kainos ir laikas (CC BY-NC 4.0) |
 | [Klaipėdos m. sav. – parkavimo zonos](https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer) | parkavimo kainos ir laikas |
 | JUDU – aikštelės, užimtumas (dabar ir istorija), gyventojų leidimų zonos, stovėjimas gatvėse, draudžiamos zonos | aikštelės, tikimybė rasti vietą, gatvės |

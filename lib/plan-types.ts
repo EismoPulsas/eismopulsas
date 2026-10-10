@@ -285,6 +285,28 @@ export type TransitResult = {
   next: number | null;
 };
 
+/** Forecast for the start of the trip (Meteo.lt + Open-Meteo rain chance). */
+export type TripWeather = {
+  /** Meteo.lt forecast place the numbers come from. */
+  place: string | null;
+  /** Meteo.lt condition code (clear, light-rain, rain, snow…). */
+  condition: string | null;
+  label: string;
+  temp: number | null;
+  feelsLike: number | null;
+  /** m/s */
+  wind: number | null;
+  gust: number | null;
+  /** mm/h, the wettest hour of the trip */
+  precip: number;
+  /** %, highest during the trip */
+  rainChance: number | null;
+  /** "bad": do not recommend riding a bike or scooter. */
+  risk: "ok" | "caution" | "bad";
+  reasons: string[];
+  forecastCreatedAt: string | null;
+};
+
 export type PlanResponse = {
   from: LatLng;
   to: LatLng;
@@ -299,4 +321,5 @@ export type PlanResponse = {
   transit: TransitResult | null;
   transitNote: string | null;
   timetable: { built: string; window: string; shifted: boolean };
+  weather: TripWeather | null;
 };
