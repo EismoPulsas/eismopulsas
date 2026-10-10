@@ -3,10 +3,6 @@ import { haversine, type LatLng } from "../geo";
 import type { CarLeg, DriveWarning, TripWeather } from "../plan-types";
 
 type Place = { code: string; name: string; coordinates: { latitude: number; longitude: number } };
-type Forecast = {
-  forecastCreationTimeUtc: string;
-  forecastTimestamps: { forecastTimeUtc: string; conditionCode: string | null; airTemperature?: number; windSpeed?: number; totalPrecipitation?: number }[];
-};
 type Point = {
   forecastTimeUtc: string;
   conditionCode: string | null;
@@ -25,8 +21,6 @@ const conditions: Record<string, string> = {
 };
 const utc = (value: string) => Date.parse(value.replace(" ", "T") + (/(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? "" : "Z"));
 
-/** Cached GET against api.meteo.lt; concurrent requests for one path share a fetch. */
-function meteoClient(request: typeof fetch) {
 type Json = (url: string, ttl: number) => Promise<unknown>;
 
 /** Cached, de-duplicated GETs of public forecast data (never user journeys). */
@@ -45,25 +39,6 @@ function createCache(request: typeof fetch): Json {
       cached.set(url, { at: Date.now(), value });
       return value;
     })();
-    pending.set(path, work);
-    try { return await work; } finally { pending.delete(path); }
-  }
-  return json;
-}
-
-async function weatherPlaces(json: (path: string, ttl: number) => Promise<unknown>): Promise<Place[]> {
-  const raw = await json("places", 24 * 3600000);
-  return (Array.isArray(raw) ? raw : []).filter((p: Place) => typeof p?.code === "string" && /^[a-z0-9-]+$/.test(p.code) && Number.isFinite(p.coordinates?.latitude) && Number.isFinite(p.coordinates?.longitude)) as Place[];
-}
-
-/** One service instance shares only public forecast data, never user journeys. */
-export function createWeatherService(request: typeof fetch = fetch) {
-  const json = meteoClient(request);
-  return async function weatherFor(leg: CarLeg): Promise<Pick<CarLeg, "weather" | "warnings">> {
-    const warnings: DriveWarning[] = [];
-    try {
-      const places = await weatherPlaces(json);
-      if (!places.length) throw new Error("No weather places");
     pending.set(url, work);
     try { return await work; } finally { pending.delete(url); }
   };
@@ -134,45 +109,6 @@ function midpoint(points: LatLng[]): LatLng {
   return points[0];
 }
 
-export const weatherFor = createWeatherService();
-
-const SKY: Record<string, string> = {
-  clear: "Giedra", "partly-cloudy": "Mažai debesuota", "cloudy-with-sunny-intervals": "Debesuota su pragiedruliais", cloudy: "Debesuota",
-  ...Object.fromEntries(Object.entries(conditions).map(([k, v]) => [k, k === "light-rain" ? "Nedidelis lietus" : v])),
-};
-
-export type Conditions = { place: string; at: string; temp: number; wind: number; precip: number; code: string; text: string };
-
-/** Forecast for one spot and time (the trip start), from the nearest meteo.lt place. */
-export function createForecastService(request: typeof fetch = fetch) {
-  const json = meteoClient(request);
-  return async function conditionsAt(pos: LatLng, atMs: number): Promise<Conditions | null> {
-    try {
-      const places = await weatherPlaces(json);
-      if (!places.length) return null;
-      const place = places.reduce((best, p) => (haversine(pos, [p.coordinates.latitude, p.coordinates.longitude]) < haversine(pos, [best.coordinates.latitude, best.coordinates.longitude]) ? p : best));
-      const f = (await json(`places/${place.code}/forecasts/long-term`, 30 * 60000)) as Forecast;
-      const times = (f?.forecastTimestamps ?? []).filter((p) => typeof p?.forecastTimeUtc === "string" && Number.isFinite(p.airTemperature));
-      if (!times.length) return null;
-      const nearest = times.reduce((a, b) => (Math.abs(utc(a.forecastTimeUtc) - atMs) <= Math.abs(utc(b.forecastTimeUtc) - atMs) ? a : b));
-      if (Math.abs(utc(nearest.forecastTimeUtc) - atMs) > 90 * 60000) return null;
-      const code = nearest.conditionCode ?? "";
-      return {
-        place: place.name,
-        at: new Date(utc(nearest.forecastTimeUtc)).toISOString(),
-        temp: nearest.airTemperature!,
-        wind: nearest.windSpeed ?? 0,
-        precip: nearest.totalPrecipitation ?? 0,
-        code,
-        text: SKY[code] ?? "",
-      };
-    } catch {
-      return null;
-    }
-  };
-}
-
-export const conditionsAt = createForecastService();
 // ---------------------------------------------------------------- trip weather
 
 // Riding a bike or scooter: what makes it a bad idea.

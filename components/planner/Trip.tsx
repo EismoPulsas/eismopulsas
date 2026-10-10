@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { wazeNavigationUrl } from "@/lib/driving";
-import type { LatLng } from "@/lib/geo";
 import type { ModeId, ModeSummary } from "@/lib/metrics";
 import type { PlanResponse } from "@/lib/plan-types";
 import { DEMO } from "./demo";
@@ -48,6 +47,7 @@ const CARD_NAME: Record<ModeId, string> = {
 const ORDER: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
 
 function cardTag(plan: PlanResponse, m: ModeSummary, best: boolean): { text: string; tone: Tone } | null {
+  if (m.weatherWarning) return { text: "Orai", tone: "stop" };
   if (best) return { text: "TOP", tone: "go" };
   if (m.id === "car" && plan.car) {
     const d = plan.car.drive.traffic.delaySeconds;
@@ -95,7 +95,7 @@ export function ModeMatrix({
             type="button"
             onClick={() => onSelect(m.id)}
             aria-pressed={on}
-            title={m.feasible ? undefined : m.why}
+            title={m.feasible ? m.weatherWarning : m.why}
             className={`flex min-w-[124px] shrink-0 snap-start flex-col items-start rounded-2xl bg-[var(--panel)] text-left transition lg:min-w-0 ${
               on ? "border-2 border-[var(--marking)] p-[11px] shadow-[0_4px_14px_rgba(5,150,105,0.15)]" : "border border-[var(--line)] p-3 hover:border-[#cbd5e1]"
             } ${m.feasible ? "" : "opacity-50"}`}
@@ -202,7 +202,12 @@ function buildSteps(plan: PlanResponse, m: ModeSummary, toLabel: string): Step[]
       for (const l of plan.transit!.legs) {
         if (l.kind === "walk") {
           if (l.distance < 30) continue;
-          steps.push({ title: l.toName ? `Eiti iki „${l.toName}“` : "Eiti iki tikslo", sub: fmtKm(l.distance), dur: l.end - l.start });
+          steps.push({
+            title: l.toName ? `Eiti iki „${l.toName}“` : "Eiti iki tikslo",
+            sub: fmtKm(l.distance),
+            dur: l.end - l.start,
+            chips: l.tight ? [{ text: "Persėsti spėsite tik paskubėję", tone: "wait", dot: true }] : undefined,
+          });
         } else {
           steps.push({
             title: `${ROUTE_TYPE[l.route.type] ?? "Maršrutas"} ${l.route.short} → ${l.headsign || l.route.long}`,
@@ -303,50 +308,6 @@ export function RouteSteps({ plan, mode, toLabel }: { plan: PlanResponse; mode: 
         </ol>
       )}
     </section>
-  );
-}
-
-/* ------------------------------------------------------------------ weather */
-
-type Conditions = { place: string; temp: number; wind: number; precip: number; code: string; text: string };
-const ACTIVE: ModeId[] = ["bike", "bikeshare", "scooter", "walk"];
-
-function verdict(mode: ModeId, c: Conditions): { text: string; tone: Tone } {
-  const active = ACTIVE.includes(mode);
-  if (c.precip >= 0.3 || /rain|thunder|sleet|snow|hail/.test(c.code)) return { text: active ? "Pasiimkite lietpaltį" : "Šlapia kelio danga", tone: "wait" };
-  if (c.temp <= 0) return { text: "Gali būti slidu", tone: "wait" };
-  if (c.wind >= 10) return { text: "Stiprus vėjas", tone: "wait" };
-  return { text: active ? (mode === "walk" ? "Puikus oras pasivaikščioti" : "Idealu važiavimui") : "Geros sąlygos", tone: "go" };
-}
-
-/** Weather at the start of the trip (meteo.lt), with a one-line verdict for the chosen way. */
-export function WeatherRow({ from, at, mode }: { from: LatLng; at: string; mode: ModeId }) {
-  const [state, setState] = useState<{ key: string; c: Conditions | null } | null>(null);
-  const key = `${from.join(",")}|${at}`;
-  useEffect(() => {
-    let alive = true;
-    fetch(`/api/weather?lat=${from[0]}&lng=${from[1]}&at=${encodeURIComponent(at)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((c) => alive && setState({ key, c }))
-      .catch(() => alive && setState({ key, c: null }));
-    return () => {
-      alive = false;
-    };
-  }, [key, from, at]);
-  const c = state?.key === key ? state.c : null;
-  if (!c) return null;
-  const v = verdict(mode, c);
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--chip)] px-3.5 py-3 text-sm">
-      <ClockIcon size={16} />
-      <span className="min-w-0 flex-1 text-[var(--muted)]">
-        Orai: <span className="text-[var(--ink)]">{c.temp > 0 ? "+" : ""}{Math.round(c.temp)}°C</span>
-        {c.text && ` • ${c.text}`} • vėjas {Math.round(c.wind)} m/s
-      </span>
-      <span className="shrink-0 text-sm font-semibold" style={{ color: TONE[v.tone].text }}>
-        {v.text}
-      </span>
-    </div>
   );
 }
 

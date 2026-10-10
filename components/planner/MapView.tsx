@@ -3,8 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import type { StyleSpecification } from "maplibre-gl";
-import { CircleMarker, MapContainer, ZoomControl, Marker, Polygon, Polyline, Tooltip, useMap, useMapEvents } from "react-leaflet";
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, ZoomControl, Marker, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
@@ -15,11 +14,9 @@ import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
 import { bikeStatus, FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, speedStatus, STATUS, ZONE_COLOR, type Area, type BikeStation, type MapPick, type Sensor, type Zone } from "./parking-meta";
 
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean };
+export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean; stops: boolean };
 /** What covers the map: the phone search card and sheet, or the desktop panel on the left. */
 type Padding = { top: number; bottom: number; left?: number };
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean; stops: boolean };
-type Padding = { top: number; bottom: number };
 
 export type MapTheme = "dark" | "fiord" | "positron" | "liberty";
 export const MAP_THEMES: { id: MapTheme; label: string; bg: string; light: boolean }[] = [
@@ -274,8 +271,6 @@ function Framer({ points, nonce, padding }: { points: LatLng[]; nonce: string; p
 
 const SCOOTER_MIN_ZOOM = 12;
 
-/** Loads scooters for the visible area whenever the map stops moving. */
-function ScooterLayer({ onState, keep }: { onState: (s: ScooterState) => void; keep: (p: LatLng) => boolean }) {
 // ---------------------------------------------------------------- public transport stops
 
 type StopRoute = { short: string; color: string; type: number };
@@ -385,7 +380,8 @@ function StopsLayer() {
   );
 }
 
-function ScooterLayer({ onState }: { onState: (s: ScooterState) => void }) {
+/** Loads scooters for the visible area whenever the map stops moving. */
+function ScooterLayer({ onState, keep }: { onState: (s: ScooterState) => void; keep: (p: LatLng) => boolean }) {
   const map = useMap();
   const [feed, setFeed] = useState<ScooterFeed | null>(null);
   useEffect(() => {
@@ -826,51 +822,8 @@ export default function MapView({
             </Polyline>
           ))}
 
-        {layers.scooters && <ScooterLayer onState={setScooterState} keep={nearStart} />}
-        {layers.traffic &&
-          traffic?.sensors.map((s, i) => {
-            const ratio = s.limit ? s.speed / s.limit : 1;
-            return (
-              <CircleMarker key={i} center={s.pos} radius={5} pathOptions={{ color: "#0c0e12", weight: 1.5, fillColor: speedColor(ratio), fillOpacity: 0.95 }}>
-                <Tooltip className="ep-tooltip">
-                  <b>{s.name}</b>
-                  <div className="text-xs opacity-80">{s.road}</div>
-                  <div className="text-xs">
-                    Vid. greitis <b>{s.speed} km/h</b>
-                    {s.limit ? ` (leidžiama ${s.limit})` : ""} · {s.vehicles} aut./15 min
-                  </div>
-                </Tooltip>
-              </CircleMarker>
-            );
-          })}
-
-        {layers.bikeshare &&
-          bikeshare?.stations.map((s) => (
-            <CircleMarker
-              key={s.id}
-              center={s.pos}
-              radius={6}
-              pathOptions={{ color: "#0c0e12", weight: 1.5, fillColor: bikeColor(s), fillOpacity: 0.95 }}
-            >
-              <Tooltip className="ep-tooltip">
-                <b>{s.name}</b>
-                {s.address && <div className="text-xs opacity-80">{s.address}</div>}
-                <div className="text-xs">
-                  {s.open ? (
-                    <>
-                      Dviračių <b>{s.bikes}</b> · laisvų vietų <b>{s.docks}</b>
-                    </>
-                  ) : (
-                    "Stotelė nedirba"
-                  )}
-                </div>
-                <div className="text-[10px] opacity-60">Cyclocity Vilnius</div>
-              </Tooltip>
-            </CircleMarker>
-          ))}
-
         {layers.stops && <StopsLayer />}
-        {layers.scooters && <ScooterLayer onState={setScooterState} />}
+        {layers.scooters && <ScooterLayer onState={setScooterState} keep={nearStart} />}
 
         {/* Unselected routes first, faint. */}
         {plan &&
@@ -908,12 +861,9 @@ export default function MapView({
         )}
         {plan?.bikeshare && selected === "bikeshare" && (
           <>
-            <Polyline positions={[plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            <Polyline positions={[plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: look.light ? "#ffffff" : "#05060a", weight: 9, opacity: look.light ? 1 : 0.85 }} />
             <Polyline positions={plan.bikeshare.walkToGeometry ?? [plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
             <Polyline positions={plan.bikeshare.walkFromGeometry ?? [plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+            <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: look.light ? "#ffffff" : "#05060a", weight: 9, opacity: look.light ? 1 : 0.85 }} />
             <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
             {[
               { s: plan.bikeshare.from, text: `Paimti dviratį · laisvų ${plan.bikeshare.from.bikes ?? "?"}` },
@@ -931,7 +881,7 @@ export default function MapView({
         {plan?.transit && selected === "transit" &&
           plan.transit.legs.map((l, i) =>
             l.kind === "walk" ? (
-              <Polyline key={i} positions={l.geometry ?? [l.from, l.to]} pathOptions={{ color: l.tight ? "#ffb020" : "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+              <Polyline key={i} positions={l.geometry ?? [l.from, l.to]} pathOptions={{ color: l.tight ? STATUS.wait : "#94a3b8", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
             ) : (
               <Fragment key={i}>
                 <Polyline positions={l.geometry} pathOptions={{ color: look.light ? "#ffffff" : "#05060a", weight: 10, opacity: look.light ? 1 : 0.85 }} />
@@ -1136,7 +1086,10 @@ function LayersPanel({
     },
     {
       title: "Viešasis transportas",
-      rows: [{ id: "lanes", label: "A juostos", sub: "Autobusai aplenkia spūstis", color: "var(--lane)", glyph: "A", legend: <Swatch line color="var(--lane)" label="Gatvė su A / A+ juosta" /> }],
+      rows: [
+        { id: "stops", label: "VT stotelės", sub: "Priartinus; paspaudus – artimiausi reisai", color: "#2563eb", glyph: "🚏" },
+        { id: "lanes", label: "A juostos", sub: "Autobusai aplenkia spūstis", color: "var(--lane)", glyph: "A", legend: <Swatch line color="var(--lane)" label="Gatvė su A / A+ juosta" /> },
+      ],
     },
   ];
   const active = groups.flatMap((g) => g.rows).filter((r) => layers[r.id]);
