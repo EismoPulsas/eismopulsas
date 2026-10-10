@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import { preconnect } from "react-dom";
 import Link from "next/link";
 import { inLithuania, type LatLng } from "@/lib/geo";
 import { DEFAULT_SETTINGS, rank, summarize, type ModeId, type Settings } from "@/lib/metrics";
@@ -58,6 +59,8 @@ const parseLL = (s: string | null): LatLng | null => {
 };
 
 export default function Planner() {
+  // Open the map tile connections while the map code is still loading.
+  preconnect("https://tiles.openfreemap.org", { crossOrigin: "anonymous" });
   const [from, setFrom] = useState<Place | null>(null);
   const [to, setTo] = useState<Place | null>(null);
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
@@ -68,7 +71,7 @@ export default function Planner() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ModeId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false });
+  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, bikeshare: false });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -183,8 +186,8 @@ export default function Planner() {
   return (
     // On phones the side panel dissolves (display: contents) so the map can sit
     // between the search box and the results.
-    <div className="asphalt flex min-h-dvh flex-col lg:h-dvh lg:flex-row">
-      <aside className="contents border-[var(--line)] lg:order-1 lg:flex lg:w-[460px] lg:shrink-0 lg:flex-col lg:overflow-y-auto lg:border-r">
+    <div className="asphalt flex min-h-dvh flex-col lg:h-dvh lg:flex-row lg:overflow-hidden">
+      <aside className="contents border-[var(--line)] lg:relative lg:order-1 lg:flex lg:w-[460px] lg:shrink-0 lg:flex-col lg:overflow-y-auto lg:border-r">
         <header className="sticky top-0 z-[1100] order-1 flex items-center gap-3 border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur">
           <Logo />
           <nav className="ml-auto flex items-center gap-1 text-sm">
@@ -374,6 +377,7 @@ function LayerToggles({ layers, onChange }: { layers: Layers; onChange: (l: Laye
     { id: "lanes", label: "A juostos", swatch: "var(--lane)" },
     { id: "traffic", label: "Gyvas eismas", swatch: "var(--wait)" },
     { id: "parking", label: "Mokamas parkavimas", swatch: "var(--sign-blue)" },
+    { id: "bikeshare", label: "Cyclocity dviračiai", swatch: "var(--bike)" },
   ];
   return (
     <div className="absolute top-3 right-3 z-[500] flex flex-col items-end gap-1.5">

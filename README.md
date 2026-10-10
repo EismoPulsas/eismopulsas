@@ -35,7 +35,10 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 | [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | automobilio, dviračio, pėsčiųjų maršrutai |
 | OpenStreetMap Nominatim | adresų paieška (per `/api/geocode`) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
-| Esri Canvas | žemėlapio pagrindas |
+| [Cyclocity Vilnius (GBFS)](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | dviračių nuomos stotelės ir laisvi dviračiai, gyvai |
+| [OpenFreeMap](https://openfreemap.org) | vektorinis žemėlapio pagrindas (MapLibre) |
+
+Visas sąrašas su endpoint'ais, podėliu ir licencijomis: [DUOMENYS.md](DUOMENYS.md).
 
 Bilietų kainos – `lib/fares.ts` (Vilnius – JUDU, Kaunas – kaunas.lt; kitų miestų ir tarpmiestinių – apytikslės, UI rodo „≈“).
 Degalų kainos – LEA vidurkiai, vartotojas gali pasikeisti.

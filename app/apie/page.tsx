@@ -49,6 +49,18 @@ const SOURCES = [
     url: "https://nominatim.openstreetmap.org/",
     use: "Adresai ir vietos tik Lietuvoje.",
   },
+  {
+    name: "Dviračių nuomos stotelės",
+    who: "Cyclocity Vilnius (JCDecaux), GBFS",
+    url: "https://www.cyclocity.lt/",
+    use: "Stotelių vietos ir kiek jose dabar yra dviračių bei laisvų vietų (atnaujinama kas minutę).",
+  },
+  {
+    name: "Žemėlapio pagrindas",
+    who: "OpenFreeMap, OpenMapTiles pagal OpenStreetMap",
+    url: "https://openfreemap.org/",
+    use: "Vektorinis tamsus žemėlapis.",
+  },
 ];
 
 export default function About() {
