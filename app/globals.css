@@ -276,6 +276,36 @@ body {
   border-radius: 2px;
 }
 
+/* Car park plate: a blue "P" sign; the coloured edge says free / paid / P+R, the number is live free spaces. */
+.ep-lot {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--sign-blue);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--c, #fff), 0 4px 10px rgba(0, 0, 0, 0.45);
+  font: 800 13px/1 var(--font-display);
+  white-space: nowrap;
+}
+.ep-lot > b {
+  display: grid;
+  place-items: center;
+  width: 22px;
+}
+.ep-lot > span {
+  padding: 0 6px 0 2px;
+  font: 700 12px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.ep-lot-chosen {
+  height: 26px;
+  box-shadow: 0 0 0 3px var(--marking), 0 6px 14px rgba(0, 0, 0, 0.5);
+}
+.ep-lot-chosen > b {
+  width: 26px;
+}
+
 /* Transit stop dot on the map. */
 .ep-stop {
   width: 12px;

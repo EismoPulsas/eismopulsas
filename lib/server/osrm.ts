@@ -21,6 +21,7 @@ export async function osrmRoute(profile: keyof typeof PROFILE, from: LatLng, to:
     `?overview=full&geometries=geojson${annotate ? "&annotations=duration" : ""}`;
   try {
     const res = await fetch(url, {
+      cache: "no-store",
       headers: { "User-Agent": "EismoPulsas/0.2 (https://github.com/EismoPulsas/eismopulsas)" },
       signal: AbortSignal.timeout(12000),
     });
@@ -43,7 +44,7 @@ export async function osrmRoute(profile: keyof typeof PROFILE, from: LatLng, to:
       segDurations: r.legs.flatMap((l) => l.annotation?.duration ?? []),
     };
   } catch (err) {
-    console.error(`OSRM ${profile} failed:`, err);
+    console.error(`OSRM ${profile} failed`, { reason: err instanceof Error ? err.name : "unknown" });
     return null;
   }
 }

@@ -8,6 +8,18 @@ export const metadata: Metadata = { title: "Kaip skaičiuojame" };
 
 const SOURCES = [
   {
+    name: "Automobilio maršrutas ir eismas",
+    who: "TomTom Orbis Routing",
+    url: "https://docs.tomtom.com/routing-api/",
+    use: "Važiavimo trukmė pagal išvykimo laiką: dabartinis eismas arba prognozė. Kelio darbai, uždarymai ir eismo įvykiai ten, kur paslauga turi duomenų.",
+  },
+  {
+    name: "Orų prognozė",
+    who: "Lietuvos hidrometeorologijos tarnyba (Meteo.lt), CC BY-SA 4.0",
+    url: "https://api.meteo.lt/",
+    use: "Perspėjimai maršruto pradžioje, viduryje ir pabaigoje, pagal kelionės laiką. Prognozė nekeičia važiavimo trukmės.",
+  },
+  {
     name: "Viešojo transporto tvarkaraščiai (GTFS)",
     who: "Lietuvos transporto saugos administracija – nacionalinis prieigos taškas",
     url: "https://www.visimarsrutai.lt/gtfs/",
@@ -29,19 +41,43 @@ const SOURCES = [
     name: "Eismo intensyvumas ir greitis",
     who: "AB „Via Lietuva“, eismoinfo.lt",
     url: "https://eismoinfo.lt/traffic-intensity-service",
-    use: "Gyvas vidutinis greitis kas 15 min. kelių jutikliuose – koreguoja automobilio laiką, jei išvykstate dabar.",
+    use: "Atsarginio automobilio vertinimo jutikliai nacionaliniuose keliuose. Naudojami tik švieži matavimai tinkama važiavimo kryptimi, jei išvykstate dabar.",
   },
   {
-    name: "Vietinės rinkliavos (parkavimo) zonos",
-    who: "Vilniaus miesto savivaldybė (vplanas) ir Klaipėdos miesto savivaldybė",
-    url: "https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer",
-    use: "Zonos ribos, kaina už valandą ir kada mokama – automobilio kainai.",
+    name: "Vilniaus rinkliavos zonos (nuo 2025-07-01)",
+    who: "JUDU (SĮ „Susisiekimo paslaugos“), CC BY-NC 4.0; Klaipėdos – Klaipėdos m. savivaldybė",
+    url: "https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/rinkliavos_zonos_2025_07/FeatureServer/5",
+    use: "Mėlynoji, raudonoji, geltonoji (ir paplūdimių), žalioji zonos: ribos, kaina, kada mokama.",
+  },
+  {
+    name: "JUDU aikštelės ir jų užimtumas",
+    who: "JUDU: aikštelių ribos (CC BY 4.0), užimtumas dabar ir istorija kas 30 s (CC BY-NC 4.0)",
+    url: "https://judu.lt/vairuotojams/stovejimo-aiksteles-vilniuje/",
+    use: "Vietų skaičius, tarifai, užtvarai, P+R; gyvos laisvos vietos ir tikimybė rasti vietą pagal savaitės dieną ir valandą.",
+  },
+  {
+    name: "Stovėjimas gatvėse ir draudžiamos zonos",
+    who: "OpenStreetMap (parking:left/right/both) ir JUDU",
+    url: "https://wiki.openstreetmap.org/wiki/Street_parking",
+    use: "Kur gatvėse galima stovėti (kaina – pagal zoną), vietos ant šaligatvio, draudžiamo stovėjimo zonos, gyventojų leidimų zonų užimtumas.",
+  },
+  {
+    name: "Privačios ir prekybos centrų aikštelės",
+    who: "UNIPARK svetainė, prekybos centrų svetainės, OpenStreetMap",
+    url: "https://unipark.lt/parkavimas-mieste/vilnius/",
+    use: "UNIPARK aikštelių koordinatės ir tarifai; didžiųjų prekybos centrų taisyklės (surinkta rankiniu būdu); kitos aikštelės – iš OpenStreetMap.",
+  },
+  {
+    name: "Elektromobilių įkrovimo prieigos",
+    who: "AB „Via Lietuva“ – viešai prieinamų įkrovimo prieigų informacinė sistema, CC BY 4.0",
+    url: "https://ev.vialietuva.lt/atviri-duomenys-1",
+    use: "Visos Lietuvos įkrovimo vietos: jungtys, galia, kainos ir gyva būsena (OCPI 2.3.0).",
   },
   {
     name: "Gatvių maršrutai",
     who: "OSRM (FOSSGIS) pagal OpenStreetMap",
     url: "https://routing.openstreetmap.de/",
-    use: "Automobilio, dviračio ir pėsčiųjų maršrutai bei laikas laisvu keliu.",
+    use: "Dviračio, pėsčiųjų ir atsarginiai automobilio maršrutai bei pradinis važiavimo laikas.",
   },
   {
     name: "Adresų paieška",
@@ -68,7 +104,7 @@ export default function About() {
           <h1 className="font-display text-3xl font-bold">Kaip skaičiuojame</h1>
           <p className="mt-2 text-[var(--muted)]">
             Eismo Pulsas palygina keturis būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
-            sutaupytumėte ar prarastumėte palikę automobilį namie. Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų.
+            sutaupytumėte ar prarastumėte palikę automobilį namie. Naudojame valstybės ir miestų atvirus duomenis bei TomTom eismo paslaugą, kai ji sukonfigūruota.
           </p>
           <div className="lane-divider mt-6" />
         </section>
@@ -77,9 +113,22 @@ export default function About() {
           <h2 className="font-display text-xl font-bold">Laikas</h2>
           <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed">
             <li>
-              <b>Automobilis:</b> laikas laisvu keliu (OSRM) + spūstys + kelios minutės iki automobilio ir vietos paieškai (ilgiau mokamose zonose). Jei išvykstate dabar, magistralių
-              atkarpos koreguojamos pagal gyvą Via Lietuva jutiklių greitį. Miestų gatvėse taikomas piko valandų priedas (darbo dienomis 7:00–9:30 ir 16:00–18:30): Vilniuje
-              +55 %, Kaune +40 %, Klaipėdoje +30 %, kituose miestuose mažiau. Tai vertinimas, ne matavimas.
+              <b>Automobilis:</b> TomTom apskaičiuotas maršrutas ir važiavimo trukmė pagal išvykimo laiką. Dabartinėms kelionėms naudojamas dabartinis eismas, būsimoms – prognozuojamas.
+              Spūstys jau įskaičiuotos, papildomų eismo priedų nepridedame. Atskirai skaičiuojame 2 min. iki automobilio, vietos paiešką ir ėjimą nuo pasirinkto parkavimo iki tikslo.
+              Pasirinkus kitą parkavimą, važiavimo atkarpa perskaičiuojama iki tos vietos. Kelio darbai ir uždarymai įvertinami pagal paslaugos turimus duomenis; kiekvieno kelio aprėptis negarantuojama.
+            </li>
+            <li>
+              <b>Atsarginis automobilio vertinimas:</b> be TomTom prieigos, pasiekus limitą ar paslaugai neatsakius naudojamas OSRM ir Via Lietuva. Jutiklių matavimai turi būti ne senesni nei 30 min.
+              Kitoms miesto atkarpoms taikomos apytikslės eismo prielaidos: darbo dienomis 7:00–9:30 ir 16:00–18:30 Vilniuje +55 %, Kaune +40 %, Klaipėdoje +30 %.
+              Šis vertinimas pažymimas kaip apytikslis; dabartiniai kelio darbai ir uždarymai gali būti neįvertinti.
+            </li>
+            <li>
+              <b>Orai ir atnaujinimas:</b> Meteo.lt prognozė tikrinama kelionės pradžioje, viduryje ir pabaigoje. Lietaus, sniego, rūko ir kiti perspėjimai rodomi atskirai, papildomų minučių nepridedama.
+              Eismas tikrinamas skaičiuojant maršrutą arba paspaudus „Atnaujinti eismą“. Kortelėje rodome šaltinį, skaičiavimo laiką ir duomenų ribotumą.
+            </li>
+            <li>
+              <b>Waze:</b> „Atidaryti Waze“ parodo Waze žemėlapį su abiem automobilio atkarpos taškais – išvykimo vieta ir tikslu (pasirinktu parkavimu).
+              „Naviguoti nuo mano vietos“ atidaro navigaciją į tą patį tikslą nuo dabartinės jūsų vietos. Waze parenka savo maršrutą, kuris gali skirtis nuo mūsų žemėlapyje rodomo kelio.
             </li>
             <li>
               <b>Viešasis transportas:</b> tikri tvarkaraščiai. Ieškome greičiausios kelionės (RAPTOR algoritmas) su iki 4 persėdimų, ėjimu iki stotelės (≈ 4,5 km/h) ir minute
@@ -87,7 +136,7 @@ export default function About() {
             </li>
             <li>
               <b>A juostos:</b> autobuso maršrutas sutapatinamas su A / A+ juostų gatvėmis (±15 m). Tvarkaraščiai jau įskaičiuoja, kad autobusas ten nestovi spūstyje, o
-              automobiliui toje pačioje gatvėje taikomas spūsčių priedas.
+              automobilio trukmė vertinama pagal jo atskirą eismo maršrutą.
             </li>
             <li>
               <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
@@ -106,7 +155,27 @@ export default function About() {
               . Kainos – LEA 2026 m. rugpjūčio vidurkiai.
             </li>
             <li>
-              <b>Parkavimas:</b> jei B taškas savivaldybės mokamoje zonoje, mokate už tas stovėjimo valandas, kurios patenka į mokamą laiką.
+              <b>Parkavimas:</b> kelionei siūlome vietas per jūsų nurodytą ėjimo atstumą nuo B – gatvėje prie tikslo, pažymėtą stovėjimą gatvėse, aikšteles
+              (JUDU, UNIPARK, prekybos centrų, OpenStreetMap) ir, elektromobiliams, įkrovimo vietas. Kiekvienai paskaičiuojame jūsų stovėjimo kainą: mokama tik
+              tai, kas patenka į mokamą laiką, įskaitant nemokamas pirmąsias minutes, brangesnę pirmą valandą (mėlynoji zona), tarifus pagal laiką ir dieną,
+              paros maksimumą ir apvalinimą (pvz. „už kiekvieną pradėtą valandą“). P+R – 1 € dienai su viešuoju transportu. Jei taisyklių nežinome, kaina
+              rodoma „?“ ir tokia vieta automatiškai nesiūloma – niekada nelaikome jos nemokama.
+            </li>
+            <li>
+              <b>Kur palikti automobilį:</b> pagal prioritetą sveriame kainą, ėjimą ir vietos paiešką (subalansuotai minutė – 0,15 €) bei tikimybę rasti vietą;
+              vietos, kur ji maža, nesiūlomos, jei yra kitų. OpenStreetMap žymėtoms kainoms pridedame 0,50 € neapibrėžtumo, nes jos gali būti pasenusios.
+            </li>
+            <li>
+              <b>Tikimybė rasti vietą:</b> JUDU užtvarinėse aikštelėse matuojamos laisvos vietos kas 30 s. Iš 12 savaičių istorijos kiekvienai savaitės dienai ir
+              valandai skaičiuojame įprastą laisvų vietų skaičių (valandos vidurkių mediana) ir kiek dienų tą valandą visą laiką buvo bent viena laisva vieta.
+              Jei išvykstate dabar, rodome ir gyvą laisvų vietų skaičių. Gatvėms – JUDU tyrimo duomenys, kiek procentų vietų gyventojų leidimų zonoje paprastai
+              užimta (ne gyvi).
+            </li>
+            <li>
+              <b>Elektromobiliai:</b> įkrovimo vietos rodomos ir skaičiuojamos tik elektromobiliams ir įkraunamiems hibridams (profilyje). Su JUDU elektromobilio
+              leidimu Vilniuje stovite nemokamai geltonojoje, žaliojoje ir raudonojoje zonose bei JUDU aikštelėse be užtvarų; mėlynojoje – pirma valanda
+              nemokama, antra 3,50 €, toliau 4 €/val. Galima įkrauti: mažesnė iš įkroviklio ir automobilio galių × stovėjimo laikas × 0,9, bet ne daugiau kaip
+              70 % baterijos.
             </li>
             <li>
               <b>Nusidėvėjimas</b> (pasirinktinai): {WEAR_PER_KM} €/km padangoms, servisui ir vertės kritimui.
@@ -153,7 +222,7 @@ export default function About() {
             ))}
           </div>
           <p className="text-xs text-[var(--muted)]">
-            Duomenys atnaujinami komanda <code className="rounded bg-[var(--chip)] px-1">npm run data</code>. Gyvas eismas – kas 5 min. tiesiai iš eismoinfo.lt.
+            Statiniai duomenys atnaujinami komanda <code className="rounded bg-[var(--chip)] px-1">npm run data</code>. Automobilio eismas tikrinamas skaičiuojant ar rankiniu būdu atnaujinant maršrutą. Via Lietuva jutikliai laikomi iki 5 min., orų prognozės – iki 30 min.
           </p>
         </section>
 
@@ -162,6 +231,7 @@ export default function About() {
           <p className="text-sm text-[var(--muted)]">Tą patį palyginimą galima gauti JSON formatu:</p>
           <pre className="overflow-x-auto rounded-xl bg-[var(--chip)] p-3 text-xs">
             {`GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876&depart=2026-10-12T08:00
+GET /api/drive?from=54.7329,25.2236&to=54.6800,25.2800&depart=2026-10-12T05:02:00Z
 GET /api/traffic          # gyvi Via Lietuva jutikliai
 GET /api/geocode?q=Gedimino pr. 9, Vilnius`}
           </pre>

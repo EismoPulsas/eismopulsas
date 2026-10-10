@@ -1,9 +1,15 @@
 "use client";
 
-import type { ModeId, ModeSummary } from "@/lib/metrics";
+import { fmtStay, parkingEvals, type ModeId, type ModeSummary, type ParkingEval, type Settings } from "@/lib/metrics";
 import type { PlanResponse, RideLeg, TransitResult } from "@/lib/plan-types";
 import { fmtClock, fmtCo2, fmtDur, fmtDurShort, fmtEur, fmtKm, fmtNum, MODE_META, ROUTE_TYPE } from "./format";
 import { BusIcon, ChevronIcon, ClockIcon, CoinIcon, FerryIcon, FlameIcon, LeafIcon, ModeBadge, TrolleyIcon, WalkIcon } from "./icons";
+import { LOT_CLASS, lotClass, ZONE_COLOR } from "./parking-meta";
+import { CarDriveDetails } from "./CarDriveDetails";
+import { localParts } from "@/lib/departure";
+
+/** Parking choice for the car option, owned by the planner. */
+export type ParkingChoiceProps = { settings: Settings; parkingId: string | null; onParking: (id: string) => void; updating?: boolean; error?: string | null };
 
 type Signal = "go" | "wait" | "stop";
 
@@ -27,12 +33,14 @@ export function ModeList({
   best,
   selected,
   onSelect,
+  parking,
 }: {
   plan: PlanResponse;
   modes: ModeSummary[];
   best: ModeId | null;
   selected: ModeId | null;
   onSelect: (m: ModeId) => void;
+  parking: ParkingChoiceProps;
 }) {
   const sig = { duration: signals(modes, "duration"), cost: signals(modes, "cost"), co2: signals(modes, "co2") };
   const order: ModeId[] = ["car", "transit", "bike", "walk"];
@@ -41,7 +49,7 @@ export function ModeList({
   return (
     <div className="flex flex-col gap-2.5">
       {sorted.map((m) => (
-        <ModeCard key={m.id} plan={plan} mode={m} isBest={m.id === best} open={m.id === selected} sig={sig} onSelect={() => onSelect(m.id)} />
+        <ModeCard key={m.id} plan={plan} mode={m} isBest={m.id === best} open={m.id === selected} sig={sig} onSelect={() => onSelect(m.id)} parking={parking} />
       ))}
       {!plan.transit && plan.transitNote && (
         <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[var(--line)] p-3 text-sm text-[var(--muted)]">
@@ -71,6 +79,7 @@ function ModeCard({
   open,
   sig,
   onSelect,
+  parking,
 }: {
   plan: PlanResponse;
   mode: ModeSummary;
@@ -78,12 +87,16 @@ function ModeCard({
   open: boolean;
   sig: Record<"duration" | "cost" | "co2", Map<ModeId, Signal>>;
   onSelect: () => void;
+  parking: ParkingChoiceProps;
 }) {
   const meta = MODE_META[m.id];
+  // A part of the price we could not work out: the total is a lower bound.
+  const partial = m.costLines.some((l) => l.unknown);
+  const waiting = m.id === "car" && (parking.updating || !!parking.error);
   const sub =
     m.id === "transit" && plan.transit
       ? `Išeiti ${fmtClock(plan.transit.leave)} · atvyksite ${fmtClock(plan.transit.arrive)}`
-      : `${fmtKm(m.distance)}${m.id === "car" && plan.car ? ` · atvyksite ${fmtClock(plan.depart.sec + m.duration)}` : ""}`;
+      : `${fmtKm(m.distance)}${m.id === "car" && plan.car ? ` · atvyksite ${fmtClock(localParts(Date.parse(plan.depart.at) + m.duration * 1000).sec)}` : ""}`;
 
   return (
     <div
@@ -104,16 +117,16 @@ function ModeCard({
           <div className="truncate text-xs text-[var(--muted)]">{m.feasible ? sub : m.why}</div>
         </div>
         <div className="hidden shrink-0 text-right sm:block">
-          <div className="tnum font-display text-xl leading-none font-bold">{fmtDur(m.duration)}</div>
+          <div className="tnum font-display text-xl leading-none font-bold">{waiting ? "—" : fmtDur(m.duration)}</div>
         </div>
         <ChevronIcon className={`shrink-0 text-[var(--muted)] transition ${open ? "rotate-180" : ""}`} />
       </button>
       <div className="grid grid-cols-3 gap-2 border-t border-[var(--line)]/70 px-3 py-2">
-        <Metric icon={<ClockIcon />} value={fmtDurShort(m.duration)} signal={sig.duration.get(m.id)} label="Laikas" />
-        <Metric icon={<CoinIcon />} value={m.cost < 0.005 ? "0 €" : fmtEur(m.cost)} signal={sig.cost.get(m.id)} label="Kaina" />
-        <Metric icon={<LeafIcon />} value={m.co2 < 0.001 ? "0 g" : fmtCo2(m.co2)} signal={sig.co2.get(m.id)} label="CO₂" />
+        <Metric icon={<ClockIcon />} value={waiting ? "—" : fmtDurShort(m.duration)} signal={sig.duration.get(m.id)} label="Laikas" />
+        <Metric icon={<CoinIcon />} value={waiting ? "—" : `${partial ? "≥ " : ""}${m.cost < 0.005 ? "0 €" : fmtEur(m.cost)}`} signal={sig.cost.get(m.id)} label="Kaina" />
+        <Metric icon={<LeafIcon />} value={waiting ? "—" : m.co2 < 0.001 ? "0 g" : fmtCo2(m.co2)} signal={sig.co2.get(m.id)} label="CO₂" />
       </div>
-      {open && <Details plan={plan} mode={m} />}
+      {open && <Details plan={plan} mode={m} parking={parking} />}
     </div>
   );
 }
@@ -127,10 +140,10 @@ function Row({ label, value, muted }: { label: React.ReactNode; value: React.Rea
   );
 }
 
-function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
+function Details({ plan, mode: m, parking }: { plan: PlanResponse; mode: ModeSummary; parking: ParkingChoiceProps }) {
   return (
     <div className="flex flex-col gap-3 border-t border-[var(--line)]/70 px-3 pt-3 pb-3.5">
-      {m.id === "car" && plan.car && <CarDetails plan={plan} />}
+      {m.id === "car" && plan.car && <CarDetails plan={plan} mode={m} parking={parking} />}
       {m.id === "transit" && plan.transit && <TransitTimeline t={plan.transit} />}
       {(m.id === "bike" || m.id === "walk") && (
         <div className="flex flex-col gap-1.5">
@@ -139,7 +152,7 @@ function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
           <Row label="Išlaidos ir CO₂" value="0 € · 0 g" muted />
         </div>
       )}
-      {m.costLines.length > 0 && (
+      {m.costLines.length > 0 && !(m.id === "car" && (parking.updating || parking.error)) && (
         <div className="flex flex-col gap-1 rounded-xl bg-[var(--chip)] p-2.5">
           {m.costLines.map((l, i) => (
             <Row
@@ -150,10 +163,12 @@ function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
                   {l.note && <span className="text-xs text-[var(--muted)]"> · {l.note}</span>}
                 </span>
               }
-              value={`${l.approx ? "≈ " : ""}${fmtEur(l.value)}`}
+              value={l.unknown ? "nežinoma" : `${l.approx ? "≈ " : ""}${fmtEur(l.value)}`}
             />
           ))}
-          {m.costLines.length > 1 && <Row label={<b>Iš viso</b>} value={<b>{fmtEur(m.cost)}</b>} />}
+          {m.costLines.length > 1 && (
+            <Row label={<b>Iš viso</b>} value={<b>{`${m.costLines.some((l) => l.unknown) ? "≥ " : ""}${fmtEur(m.cost)}`}</b>} />
+          )}
         </div>
       )}
       {m.id === "transit" && m.kcal > 5 && (
@@ -163,40 +178,15 @@ function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
   );
 }
 
-function CarDetails({ plan }: { plan: PlanResponse }) {
+function CarDetails({ plan, mode, parking }: { plan: PlanResponse; mode: ModeSummary; parking: ParkingChoiceProps }) {
   const c = plan.car!;
-  const t = c.traffic;
-  const delay = t.urbanDelay + t.liveDelay;
-  const peakLabel = { peak: "piko metas", day: "dienos eismas", night: "naktis, laisvi keliai" }[t.peak];
+  const park = mode.parking;
   return (
     <div className="flex flex-col gap-1.5">
-      <Row label="Važiavimas laisvu keliu" value={fmtDur(c.baseDuration)} />
-      <Row
-        label={
-          <span>
-            Spūstys{" "}
-            <span className="text-xs text-[var(--muted)]">
-              · {t.source === "live" ? "gyvi Via Lietuva duomenys" : t.city ? `${t.city}, ${peakLabel} (vertinimas)` : peakLabel}
-            </span>
-          </span>
-        }
-        value={`${delay >= 0 ? "+" : "−"}${fmtDur(delay)}`}
-      />
-      <Row label="Iki automobilio ir vietos paieška" value={`+${fmtDur(c.overhead)}`} />
-      {t.sensors.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          {t.sensors.slice(0, 6).map((s, i) => {
-            const r = s.speed / s.limit;
-            return (
-              <span key={i} className="flex items-center gap-1.5 rounded-lg bg-[var(--chip)] px-2 py-1 text-xs" title={s.road}>
-                <span className={`signal ${r >= 0.85 ? "go" : r >= 0.6 ? "wait" : "stop"}`} />
-                {s.name}: <b className="tnum">{s.speed}</b>/{s.limit} km/h
-              </span>
-            );
-          })}
-        </div>
-      )}
-      {c.parking ? (
+      <CarDriveDetails leg={c.drive} parking={park?.option} searchSec={park?.searchSec ?? Math.max(0, c.overhead - 120)} walkSec={park?.walkSec} updating={parking.updating} error={parking.error} />
+      {c.parkingOptions?.length ? (
+        <ParkingChoice plan={plan} chosen={park ?? null} {...parking} />
+      ) : c.parking ? (
         <div className="mt-1 rounded-xl border border-[var(--line)] p-2.5 text-xs">
           <b className="text-sm">P · {c.parking.city}, {c.parking.zone.toLowerCase()}</b>
           <div className="mt-0.5 text-[var(--muted)]">{c.parking.text}</div>
@@ -204,6 +194,78 @@ function CarDetails({ plan }: { plan: PlanResponse }) {
       ) : (
         <div className="text-xs text-[var(--muted)]">Tikslas ne savivaldybės mokamoje parkavimo zonoje (pagal atvirus Vilniaus ir Klaipėdos duomenis).</div>
       )}
+    </div>
+  );
+}
+
+const CHANCE_SIGNAL = { high: "go", mid: "wait", low: "stop" } as const;
+
+/** Where to leave the car near B: price for the stay, walk, chance of a space; one is chosen. */
+function ParkingChoice({ plan, chosen, settings, parkingId, onParking }: ParkingChoiceProps & { plan: PlanResponse; chosen: ParkingEval | null }) {
+  const evals = parkingEvals(plan, settings);
+  const auto = parkingId == null;
+  // The chosen place first, then the rest by walking distance; at most 7 rows.
+  const rows = [...evals].sort((a, b) => (a.option.id === chosen?.option.id ? -1 : b.option.id === chosen?.option.id ? 1 : a.option.walk - b.option.walk)).slice(0, 7);
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">Kur palikti automobilį</span>
+        <span className="text-[11px] text-[var(--muted)]">{fmtStay(settings.parkingHours * 60)} stovėjimas</span>
+      </div>
+      <ul className="flex flex-col gap-1" role="radiogroup" aria-label="Kur palikti automobilį">
+        {rows.map((e) => {
+          const o = e.option;
+          const on = o.id === chosen?.option.id;
+          const dot =
+            o.kind === "lot" && o.lot
+              ? LOT_CLASS[lotClass(o.lot)].color
+              : o.kind === "charger"
+                ? "#22d3ee"
+                : o.zone
+                  ? (ZONE_COLOR[o.zone.zone] ?? "#999")
+                  : "#aab3c3";
+          return (
+            <li key={o.id}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={!e.usable}
+                onClick={() => onParking(o.id)}
+                className={`flex w-full items-start gap-2.5 rounded-xl border px-2.5 py-2 text-left transition ${on ? "border-[var(--car)] bg-[var(--chip)]" : "border-[var(--line)] hover:bg-[var(--chip)]"} ${e.usable ? "" : "opacity-50"}`}
+              >
+                <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">
+                    {o.name}
+                    {e.charge && <span className="ml-1 text-xs text-[var(--muted)]">⚡ {e.charge.kW} kW</span>}
+                  </span>
+                  <span className="block text-xs text-[var(--muted)]">
+                    {o.walk > 0 ? `${Math.max(1, Math.round(e.walkSec / 60))} min pėsčiomis` : "prie pat tikslo"}
+                    {!e.usable && e.why ? ` · ${e.why}` : e.costNote ? ` · ${e.costNote}` : ""}
+                  </span>
+                  {e.chanceText && (
+                    <span className="mt-0.5 flex items-center gap-1.5 text-xs">
+                      {e.chance && <span className={`signal ${CHANCE_SIGNAL[e.chance]}`} aria-hidden />}
+                      {e.chanceText}
+                    </span>
+                  )}
+                  {e.charge && (
+                    <span className="block text-xs text-[var(--muted)]">
+                      Įkrausite iki ~{e.charge.kWh} kWh (≈ {e.charge.km} km){e.charge.cost != null ? `, ~${fmtEur(e.charge.cost)}` : ""}
+                    </span>
+                  )}
+                </span>
+                <span className="tnum shrink-0 text-sm font-semibold">{e.cost == null ? "?" : e.cost === 0 ? "0 €" : fmtEur(e.cost)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+        {auto ? "Parinkta pagal prioritetą: kaina, ėjimas ir tikimybė rasti vietą. " : ""}
+        Kainos – pagal paskelbtus tarifus (JUDU, UNIPARK, prekybos centrai, OpenStreetMap). „?“ – taisyklės nežinomos, tokia vieta automatiškai nesiūloma.
+      </p>
     </div>
   );
 }

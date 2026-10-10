@@ -2,29 +2,32 @@
 // Builds the data files the route planner reads.
 //
 //   npm run data            # everything
-//   npm run data -- transit # only one part: transit | lanes | parking | border
+//   npm run data -- transit # only one part: transit | lanes | parking | chargers | border
 //
 // Sources (all open, no keys needed):
 //   - LTSA nacionalinis prieigos taškas, visų Lietuvos viešojo transporto GTFS (visimarsrutai.lt)
 //   - stops.lt Šiaulių miesto GTFS (Šiaulių maršrutų nacionaliniame rinkinyje nėra)
 //   - SĮ „Susisiekimo paslaugos“ (JUDU): Vilniaus A / A+ juostos (ArcGIS FeatureServer)
 //   - OpenStreetMap (Overpass): autobusų juostos kituose miestuose
-//   - Vilniaus m. sav. (vplanas) ir Klaipėdos m. sav.: vietinės rinkliavos (parkavimo) zonos
+//   - parkavimas ir elektromobilių įkrovimas – žr. scripts/build-parking.mjs
 //   - geoBoundaries (OpenStreetMap): Lietuvos siena žemėlapio kaukei
 //
 // Outputs:
 //   data/transit.json.gz      – compact timetable for the server-side router
 //   public/data/bus-lanes.json
-//   public/data/parking.json
+//   public/data/{parking,lots,street-parking,lot-occupancy,chargers}.json (build-parking.mjs)
 //   public/data/lithuania.json
 //
 // Raw downloads are cached in .cache/ for a day, so re-runs are fast.
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
+import { buildChargers, buildParking } from "./build-parking.mjs";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+// fileURLToPath, not URL.pathname: the latter gives "/C:/…" on Windows.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CACHE = path.join(ROOT, ".cache");
 const UA = "EismoPulsas/0.2 data builder (+https://github.com/EismoPulsas/eismopulsas)";
 
@@ -458,94 +461,6 @@ async function buildLanes() {
   console.log(`  → public/data/bus-lanes.json (${official} official + ${lanes.length - official} OSM segments)`);
 }
 
-// ---------------------------------------------------------------- parking
-
-const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
-
-/** "I-VI 8-20 val." -> { days: [1..6], hours: [[8, 20]] } */
-function parseVilniusSchedule(s) {
-  const m = /^(I{1,3}|IV|VI{0,2}|V)\s*-\s*(I{1,3}|IV|VI{0,2}|V)\s+(\d+)\s*-\s*(\d+)/.exec(s.trim());
-  if (!m) return null;
-  const days = [];
-  for (let d = ROMAN[m[1]]; d <= ROMAN[m[2]]; d++) days.push(d);
-  return [{ days, hours: [[+m[3], +m[4]]] }];
-}
-
-const MONTHS = { sausio: 1, vasario: 2, kovo: 3, balandžio: 4, gegužės: 5, birželio: 6, liepos: 7, rugpjūčio: 8, rugsėjo: 9, spalio: 10, lapkričio: 11, gruodžio: 12 };
-
-/** Klaipėda's free-text schedule -> rules with optional seasons. */
-function parseKlaipedaSchedule(s) {
-  const rules = [];
-  // Split into seasonal clauses where present.
-  const seasonRe = /nuo\s+(\p{L}+)\s+(\d+)\s*d\.\s*iki\s+(\p{L}+)\s+(\d+)\s*d\.?\s*[–-]?\s*([^,]*?(?:val\.?|$)(?:[^,]*?val\.?)?)(?=,|\s*o\s|$)/gu;
-  const clauses = [];
-  let m;
-  while ((m = seasonRe.exec(s))) {
-    const from = MONTHS[m[1].toLowerCase()], to = MONTHS[m[3].toLowerCase()];
-    if (from && to) clauses.push({ season: [from * 100 + +m[2], to * 100 + +m[4]], text: m[5] });
-  }
-  if (!clauses.length) clauses.push({ season: null, text: s });
-  for (const c of clauses) {
-    const weekdaysOnly = /darbo dienomis|išskyrus šeštadienį/.test(c.text) || (!/kiekvieną dieną/.test(c.text) && /darbo/.test(s));
-    const hours = [...c.text.matchAll(/nuo\s+(\d+)[.:]\d\d\s+iki\s+(\d+)[.:]\d\d/g)].map((h) => [+h[1], +h[2]]);
-    if (!hours.length) continue;
-    rules.push({ season: c.season, days: weekdaysOnly ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 7], hours });
-  }
-  return rules.length ? rules : null;
-}
-
-function polygonsOf(geom) {
-  const polys = geom.type === "MultiPolygon" ? geom.coordinates : [geom.coordinates];
-  return polys.map((rings) => rings.map((ring) => simplify(ring.map(([lng, lat]) => [lat, lng]), 3).map(([a, b]) => [round5(a), round5(b)])));
-}
-
-async function buildParking() {
-  console.log("Parking zones…");
-  const zones = [];
-
-  const vln = "https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer/1";
-  const v = await getJson(`${vln}/query?where=1%3D1&outFields=Rinkliava,Mokama,Zona&outSR=4326&f=geojson`);
-  for (const f of v.features) {
-    const p = f.properties;
-    const price = +(/([\d,]+)\s*Eur/.exec(p.Rinkliava)?.[1] ?? "").replace(",", ".");
-    if (!price) continue;
-    const seasonal = /maudykl/i.test(p.Mokama);
-    const rules = seasonal ? [{ season: [601, 831], days: [1, 2, 3, 4, 5, 6, 7], hours: [[8, 20]] }] : parseVilniusSchedule(p.Mokama);
-    zones.push({ city: "Vilnius", zone: p.Zona, price, text: `${p.Rinkliava}, ${p.Mokama}`, rules, poly: polygonsOf(f.geometry) });
-  }
-
-  const kln = "https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer/0";
-  const k = await getJson(`${kln}/query?where=1%3D1&outFields=Zona,Pastabos,Mokestis,Rinkliava_renkama&outSR=4326&f=geojson`);
-  const kName = { R: "Raudonoji zona", GG: "Geltonoji zona", Z: "Žalioji zona" };
-  for (const f of k.features) {
-    const p = f.properties;
-    // "Iki 30 min. – 0,30 Eur" -> 0.60 €/h
-    const m = /Iki\s+(\d+)\s*min\.?\s*[–-]\s*([\d,]+)\s*Eur/i.exec(p.Mokestis ?? "");
-    if (!m || !f.geometry) continue;
-    const price = Math.round((+m[2].replace(",", ".") * 60) / +m[1] * 100) / 100;
-    zones.push({
-      city: "Klaipėda",
-      zone: kName[p.Pastabos] ?? `Zona ${p.Zona}`,
-      price,
-      text: `${m[1]} min. – ${m[2]} Eur; ${p.Rinkliava_renkama}`,
-      rules: parseKlaipedaSchedule(p.Rinkliava_renkama ?? ""),
-      poly: polygonsOf(f.geometry),
-    });
-  }
-
-  const file = {
-    updated: new Date().toISOString().slice(0, 10),
-    sources: [
-      { name: "Vilniaus m. sav. – vietinės rinkliavos zonos", url: vln },
-      { name: "Klaipėdos m. sav. – parkavimo zonos", url: kln },
-    ],
-    zones,
-  };
-  await fs.writeFile(path.join(ROOT, "public", "data", "parking.json"), JSON.stringify(file));
-  const unparsed = zones.filter((z) => !z.rules).length;
-  console.log(`  → public/data/parking.json (${zones.length} zones${unparsed ? `, ${unparsed} without parsed schedule` : ""})`);
-}
-
 // ---------------------------------------------------------------- border
 
 async function buildBorder() {
@@ -569,7 +484,9 @@ async function buildBorder() {
 
 const only = process.argv.slice(2);
 const want = (part) => !only.length || only.includes(part);
+const helpers = { ROOT, CACHE, UA, getJson, cachedDownload, simplify, round5 };
 if (want("lanes")) await buildLanes();
-if (want("parking")) await buildParking();
+if (want("parking")) await buildParking(helpers);
+if (want("chargers")) await buildChargers(helpers);
 if (want("border")) await buildBorder();
 if (want("transit")) await buildTransit();

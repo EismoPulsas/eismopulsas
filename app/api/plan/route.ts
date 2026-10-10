@@ -1,50 +1,22 @@
 // Compares getting from A to B by car, public transport, bicycle and on foot.
 //
-//   GET /api/plan?from=54.6872,25.2797&to=54.7310,25.2620[&depart=2026-10-10T08:30]
+//   GET /api/plan?from=54.6872,25.2797&to=54.7310,25.2620[&depart=2026-10-10T08:30][&walk=10]
 //
-// `depart` is local Lithuanian time; without it the trip starts now. Costs and
-// CO₂ are computed in the browser (lib/metrics.ts) so settings apply instantly.
+// `depart` is local Lithuanian time; without it the trip starts now. `walk` is the
+// longest walk from the car the user accepts, in minutes (profile; default 10).
+// Costs and CO₂ are computed in the browser (lib/metrics.ts) so settings apply instantly.
 
-import { haversine, inLithuania, simplify, type LatLng } from "@/lib/geo";
+import { haversine, inLithuania, simplify } from "@/lib/geo";
+import { carDeparture, departure, localSecondsAt } from "@/lib/departure";
+import { parsePoint } from "@/lib/driving";
 import type { CarResult, PlanResponse } from "@/lib/plan-types";
+import { liveLots } from "@/lib/server/live-parking";
 import { osrmRoute } from "@/lib/server/osrm";
-import { parkingZoneAt } from "@/lib/server/parking";
-import { applyTraffic } from "@/lib/server/traffic";
+import { parkingNear, parkingZoneAt } from "@/lib/server/parking";
+import { routeCar } from "@/lib/server/driving";
 import { planTransit, resolveDay, timetableInfo } from "@/lib/server/transit";
 
 const BIKE_SPEED = 16 / 3.6; // m/s
-
-const parsePoint = (s: string | null): LatLng | null => {
-  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(s ?? "");
-  return m ? [+m[1], +m[2]] : null;
-};
-
-/** Current or requested local time in Lithuania. */
-function departure(param: string | null) {
-  const now = new Date();
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Vilnius",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(now)
-      .map((p) => [p.type, p.value]),
-  );
-  const nowDate = `${parts.year}-${parts.month}-${parts.day}`;
-  const nowSec = +parts.hour * 3600 + +parts.minute * 60 + +parts.second;
-  const m = /^(\d{4}-\d\d-\d\d)T(\d\d):(\d\d)/.exec(param ?? "");
-  const date = m ? m[1] : nowDate;
-  const sec = m ? +m[2] * 3600 + +m[3] * 60 : nowSec;
-  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-  const diff = (Date.parse(`${date}T00:00:00Z`) + sec * 1000 - (Date.parse(`${nowDate}T00:00:00Z`) + nowSec * 1000)) / 60000;
-  return { date, sec, weekday, isNow: Math.abs(diff) <= 45 };
-}
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
@@ -54,31 +26,40 @@ export async function GET(req: Request) {
   if (!inLithuania(from) || !inLithuania(to))
     return Response.json({ error: "Kol kas skaičiuojame tik maršrutus Lietuvoje" }, { status: 400 });
 
-  const depart = departure(q.get("depart"));
+  let depart;
+  try { depart = departure(q.get("depart")); }
+  catch (err) { return Response.json({ error: err instanceof Error ? err.message : "Neteisingas laikas." }, { status: 400 }); }
   const straight = haversine(from, to);
   if (straight < 50) return Response.json({ error: "Taškai A ir B per arti vienas kito" }, { status: 400 });
 
-  const [carRoute, bike, walk] = await Promise.all([
-    osrmRoute("car", from, to, true),
+  const [drive, bike, walk] = await Promise.all([
+    routeCar(from, to, carDeparture(depart)),
     straight < 80_000 ? osrmRoute("bike", from, to) : null,
     straight < 25_000 ? osrmRoute("foot", from, to) : null,
   ]);
 
   let car: CarResult | null = null;
-  if (carRoute) {
-    const { extra, info } = await applyTraffic(carRoute.coords, carRoute.segDurations, depart.weekday, depart.sec, depart.isNow);
+  if (drive) {
     const parking = parkingZoneAt(to);
     // Walk to the car, then find a spot and walk from it (longer in paid zones).
+    // The browser replaces the second part when the user picks where to park.
     const overhead = 120 + (parking ? 360 : 180);
-    const baseDuration = Math.round(carRoute.duration);
+    const duration = drive.duration + overhead;
+    const arrive = localSecondsAt(Date.parse(drive.arrivalAt) + (overhead - 120) * 1000, depart.date);
+    const walk = Math.min(20, Math.max(3, Number(q.get("walk")) || 10));
+    // Live free spaces only make sense for a trip that starts about now.
+    const live = depart.isNow ? await liveLots() : null;
     car = {
-      distance: Math.round(carRoute.distance),
-      baseDuration,
-      traffic: info,
+      drive,
+      distance: drive.distance,
+      baseDuration: drive.baseDuration,
+      traffic: drive.traffic,
       overhead,
-      duration: baseDuration + extra + overhead,
-      geometry: simplify(carRoute.coords, 8),
+      duration,
+      geometry: drive.geometry,
       parking,
+      arrive,
+      parkingOptions: parkingNear(to, depart.date, arrive, live, walk),
     };
   }
 
@@ -109,5 +90,5 @@ export async function GET(req: Request) {
     transitNote,
     timetable: { ...timetableInfo(), shifted },
   };
-  return Response.json(body);
+  return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

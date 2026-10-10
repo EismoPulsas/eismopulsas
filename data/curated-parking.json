@@ -1,0 +1,94 @@
+{
+  "about": "Prekybos centrų aikštelės, kurių taisyklių nėra jokiame mašininiame šaltinyje. Surinkta rankiniu būdu iš oficialių svetainių; kiekvienas įrašas turi šaltinį ir patikrinimo datą. Kainos nespėjamos: jei centras jos neskelbia, known=false. 'snap' – prisegti prie artimiausios OpenStreetMap aikštelės (jos ribų ir vietų skaičiaus) per nurodytą atstumą.",
+  "lots": [
+    {
+      "id": "akropolis-vilnius",
+      "name": "PLC „Akropolis“",
+      "addr": "Ozo g. 25, Vilnius",
+      "city": "Vilnius",
+      "pos": [54.71052, 25.2629],
+      "snap": { "within": 250 },
+      "cap": 3000,
+      "access": "customers",
+      "op": "Akropolis",
+      "url": "https://www.akropolis.lt/en/vilnius/sc-plan",
+      "checked": "2026-10-10",
+      "t": { "known": true, "free": true, "maxStayMin": 1440, "text": ["Nemokama", "Ne ilgiau kaip 24 val.", "Veikia visą parą"] }
+    },
+    {
+      "id": "ozas-multi",
+      "name": "PPC „Ozas“ – daugiaaukštė aikštelė",
+      "addr": "Ozo g. 18, Vilnius",
+      "city": "Vilnius",
+      "pos": [54.71445, 25.27422],
+      "snap": { "within": 300, "kind": "multi-storey" },
+      "kind": "multi-storey",
+      "access": "customers",
+      "op": "ADC parking",
+      "url": "https://ozas.lt/puslapis/parkingas",
+      "checked": "2026-10-10",
+      "t": {
+        "known": true,
+        "freeMin": 180,
+        "rates": [{ "rules": null, "perHour": 1 }],
+        "step": 60,
+        "text": ["3 val. per parą nemokamai", "Vėliau 1,00 €/val. (už kiekvieną pradėtą valandą)", "Atidaryta kasdien 8:00–23:30", "Kai kurių nuomininkų klientams – papildomas nemokamas laikas"]
+      }
+    },
+    {
+      "id": "ozas-outdoor",
+      "name": "PPC „Ozas“ – lauko aikštelė",
+      "addr": "Ozo g. 18, Vilnius",
+      "city": "Vilnius",
+      "pos": [54.71445, 25.27422],
+      "snap": { "within": 300, "kind": "surface" },
+      "kind": "surface",
+      "access": "customers",
+      "op": "ADC parking",
+      "url": "https://ozas.lt/puslapis/parkingas",
+      "checked": "2026-10-10",
+      "t": {
+        "known": true,
+        "freeMin": 30,
+        "rates": [{ "rules": null, "perHour": 1 }],
+        "step": 60,
+        "text": ["30 min. per parą nemokamai (įskaitant −1D aukštą)", "Vėliau 1,00 €/val. (už kiekvieną pradėtą valandą)", "Veikia visą parą"]
+      }
+    },
+    {
+      "id": "domus-galerija",
+      "name": "PC „Domus galerija“",
+      "addr": "Ukmergės g. 233, Vilnius",
+      "city": "Vilnius",
+      "pos": [54.72074, 25.24564],
+      "snap": { "within": 150 },
+      "access": "customers",
+      "op": "Parkavimasmieste.lt",
+      "url": "https://www.domusgalerija.lt/parkavimas",
+      "checked": "2026-10-10",
+      "t": {
+        "known": true,
+        "freeMin": 180,
+        "rates": [{ "rules": null, "perHour": 2 }],
+        "step": 60,
+        "text": ["3 val. nemokamai", "Kiekviena papildoma valanda – 2,00 €", "Mokama visą parą", "Grįžus tą pačią dieną mokestis skaičiuojamas nuo pirmos minutės"]
+      }
+    },
+    {
+      "id": "europa",
+      "name": "PC „Europa“ – daugiaaukštė aikštelė",
+      "addr": "Konstitucijos pr. 7A, Vilnius",
+      "city": "Vilnius",
+      "pos": [54.69638, 25.27703],
+      "snap": { "within": 150, "kind": "multi-storey" },
+      "kind": "multi-storey",
+      "access": "public",
+      "url": "https://www.pceuropa.lt/parkavimas",
+      "checked": "2026-10-10",
+      "t": {
+        "known": false,
+        "text": ["Mokama; aikštelė nepriklauso prekybos centrui, valandinė kaina neskelbiama", "1 val. nemokamai pateikus pirkinio kvitą iš IKI, Suitsupply, Lindex, Given, Odore D'amore, Knock", "Yra elektromobilių įkrovimo stotelių"]
+      }
+    }
+  ]
+}
