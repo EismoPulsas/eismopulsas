@@ -22,6 +22,7 @@ Status labels used in this file: **CURRENT** (exists in code), **PARTIAL**, **PL
 │  └─ api/
 │     ├─ accidents/, reports/, blackspots/, geocode/   CURRENT public API (contracts frozen; geocode used by mobile)
 │     └─ mobility/plan/   CURRENT  BFF endpoint for the mobile app (ROUTING.md § 9)
+├─ proxy.ts               CURRENT  dev-only CORS for the app's web build (/api/mobility/*, /api/geocode)
 ├─ components/            legacy web UI (map/, stats/, header) (LEGACY)
 ├─ lib/
 │  ├─ data.ts, stats.ts, reports.ts, reports-store.ts   CURRENT (legacy domain + report storage)
@@ -365,7 +366,7 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
   - **Vercel Preview / production** → `https://<deployment>.vercel.app`. Preview deployments with Vercel Authentication enabled are not reachable from the app: use production or disable protection for the Preview.
 - Missing or malformed base URL → an inline setup error on Home before planning. It must be an HTTP(S) **origin** (no credentials, path, query or fragment). Native builds reject `localhost`, `127.x.x.x`, `0.0.0.0` and `[::1]`; use the emulator/LAN/deployment address above. Fix `EXPO_PUBLIC_API_BASE_URL`, restart Expo and fully reload the app; installed bundles need rebuilding.
 - Plain `http://` to a LAN address is normally fine in Expo Go during development (not verified on a device here). A release APK should use HTTPS (the Vercel URL), because Android blocks cleartext traffic by default.
-- React Native `fetch` is not subject to CORS. The BFF sends no CORS headers; a web build of the app would need them (not planned).
+- React Native `fetch` is not subject to CORS. Only for trying the app in a browser (`npx expo start --web`, base URL `http://localhost:3000`), `proxy.ts` answers CORS for `/api/mobility/*` and `/api/geocode` — under `next dev` and for loopback origins (`http://localhost|127.0.0.1|[::1]:<port>`) only. Production sends no CORS headers. On web the route map is a placeholder and the arrive-by time picker does nothing (the default time is used).
 - Timeouts: 15 s on the client including body decoding; 2,5 s each for zone lookup and occupancy on the server (in parallel). Leaving a loading comparison aborts the client request; retry sends its stored request unchanged. Address edits/clear/unmount cancel search and discard stale results. No automatic network retry.
 - Versioning: the response carries `version: 1`. Contract changes go through ROUTING.md § 9 + `lib/mobility/types.ts` in one PR; the app's type-check catches drift.
 

@@ -125,6 +125,8 @@ Reikia: Node 22.13+ ir Android telefono su **Expo Go** (Google Play) arba Androi
    npx expo start        # nuskenuokite QR kodą su Expo Go arba spauskite "a" emuliatoriui
    ```
    Pakeitus `.env`, Expo reikia paleisti iš naujo.
+
+   **Greitas bandymas naršyklėje:** `EXPO_PUBLIC_API_BASE_URL=http://localhost:3000` ir `npx expo start --web`. Veikia tik su `npm run dev` (CORS leidžiamas tik dev režimu ir tik `localhost`). Žemėlapis ir laiko pasirinkimas naršyklėje neveikia – tikras bandymas yra telefone.
 4. Patikrinimai prieš commit (`mobile/`): `npx tsc --noEmit`, `npm run lint`, `npx expo-doctor`. Šakniniame kataloge – `npm run lint`, `npm run build` (žr. [TESTING.md](TESTING.md)).
 
 **Žemėlapis:** Expo Go Android'e veikia be rakto. Savarankiškam APK (EAS Build arba vietinis build) reikės **Google Maps Android API rakto**:
