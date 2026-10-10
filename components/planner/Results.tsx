@@ -118,6 +118,7 @@ function ModeCard({
             )}
           </div>
           <div className="truncate text-xs text-[var(--muted)]">{m.feasible ? sub : m.why}</div>
+          {m.weatherWarning && <div className="mt-0.5 truncate text-xs font-medium text-[var(--stop)]">{m.weatherWarning}</div>}
         </div>
         <div className="hidden shrink-0 text-right sm:block">
           <div className="tnum font-display text-xl leading-none font-bold">{waiting ? "—" : fmtDur(m.duration)}</div>

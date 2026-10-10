@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import type { StyleSpecification } from "maplibre-gl";
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
@@ -14,7 +14,7 @@ import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
 import { FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, ZONE_COLOR, type Area, type MapPick, type Zone } from "./parking-meta";
 
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean };
+export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean; stops: boolean };
 type Padding = { top: number; bottom: number };
 
 export type MapTheme = "dark" | "fiord" | "positron" | "liberty";
@@ -184,6 +184,115 @@ function Framer({ points, nonce, padding }: { points: LatLng[]; nonce: string; p
 const SCOOTER_MIN_ZOOM = 12;
 
 /** Loads scooters for the visible area whenever the map stops moving. */
+// ---------------------------------------------------------------- public transport stops
+
+type StopRoute = { short: string; color: string; type: number };
+type MapStop = { id: number; name: string; pos: LatLng; routes: StopRoute[] };
+type Departure = StopRoute & { route: string; headsign: string; time: number };
+
+const STOPS_MIN_ZOOM = 15;
+const routeColor = (r: { color: string }) => r.color || "#4b8bff";
+
+function RouteChip({ short, color }: { short: string; color: string }) {
+  return (
+    <span className="inline-block rounded px-1 text-[11px] leading-[16px] font-bold text-white" style={{ background: color || "#4b8bff" }}>
+      {short}
+    </span>
+  );
+}
+
+/** Next departures, loaded when the stop's popup opens (react-leaflet mounts popup content only then). */
+function StopDepartures({ stop }: { stop: MapStop }) {
+  const [data, setData] = useState<{ departures: Departure[] } | null | "error">(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`/api/stops?id=${stop.id}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setData)
+      .catch((e) => e?.name !== "AbortError" && setData("error"));
+    return () => ctrl.abort();
+  }, [stop.id]);
+  return (
+    <div className="w-60">
+      <div className="font-semibold">{stop.name}</div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {stop.routes.map((r) => (
+          <RouteChip key={r.short} short={r.short} color={r.color} />
+        ))}
+      </div>
+      <div className="mt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">Artimiausi išvykimai</div>
+      {data === null && <div className="text-xs text-[var(--muted)]">Kraunama…</div>}
+      {data === "error" && <div className="text-xs text-[var(--wait)]">Nepavyko gauti tvarkaraščio.</div>}
+      {data && data !== "error" && !data.departures.length && <div className="text-xs text-[var(--muted)]">Per artimiausias 2 val. reisų nėra.</div>}
+      {data && data !== "error" && (
+        <ul className="mt-1 flex flex-col gap-0.5">
+          {data.departures.map((d, i) => (
+            <li key={i} className="flex items-center gap-1.5 text-xs">
+              <span className="tnum w-9 shrink-0 font-semibold">{fmtClock(d.time)}</span>
+              <RouteChip short={d.route} color={d.color} />
+              <span className="truncate text-[var(--muted)]">→ {d.headsign}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-1.5 text-[10px] text-[var(--muted)]">Pagal tvarkaraštį (LTSA GTFS)</div>
+    </div>
+  );
+}
+
+/** Stops in the visible area once zoomed in to street level. */
+function StopsLayer() {
+  const map = useMap();
+  const [stops, setStops] = useState<MapStop[]>([]);
+  useEffect(() => {
+    let ctrl: AbortController | null = null;
+    const load = () => {
+      ctrl?.abort();
+      if (map.getZoom() < STOPS_MIN_ZOOM) {
+        setStops([]);
+        return;
+      }
+      const b = map.getBounds().pad(0.2);
+      ctrl = new AbortController();
+      fetch(`/api/stops?bbox=${[b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((v) => v.toFixed(4)).join(",")}`, { signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((d: { stops: MapStop[] }) => setStops(d.stops ?? []))
+        .catch(() => {});
+    };
+    load();
+    map.on("moveend", load);
+    return () => {
+      ctrl?.abort();
+      map.off("moveend", load);
+    };
+  }, [map]);
+  return (
+    <>
+      {stops.map((st) => (
+        <CircleMarker
+          key={st.id}
+          center={st.pos}
+          radius={5}
+          pathOptions={{ color: routeColor(st.routes[0]), weight: 2.5, fillColor: "#ffffff", fillOpacity: 1 }}
+        >
+          <Tooltip className="ep-tooltip" direction="top" offset={[0, -4]}>
+            <b>{st.name}</b>
+            <div className="mt-0.5 flex max-w-56 flex-wrap gap-1">
+              {st.routes.slice(0, 12).map((r) => (
+                <RouteChip key={r.short} short={r.short} color={r.color} />
+              ))}
+              {st.routes.length > 12 && <span className="text-xs">+{st.routes.length - 12}</span>}
+            </div>
+          </Tooltip>
+          <Popup className="ep-popup" autoPan>
+            <StopDepartures stop={st} />
+          </Popup>
+        </CircleMarker>
+      ))}
+    </>
+  );
+}
+
 function ScooterLayer({ onState }: { onState: (s: ScooterState) => void }) {
   const map = useMap();
   const [feed, setFeed] = useState<ScooterFeed | null>(null);
@@ -668,6 +777,7 @@ export default function MapView({
             </CircleMarker>
           ))}
 
+        {layers.stops && <StopsLayer />}
         {layers.scooters && <ScooterLayer onState={setScooterState} />}
 
         {/* Unselected routes first, faint. */}

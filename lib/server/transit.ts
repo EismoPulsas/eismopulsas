@@ -485,3 +485,51 @@ export function stopsWithin(c: LatLng, radius: number): LatLng[] {
     .map((s) => stopPos(N, s))
     .filter((p) => haversine(c, p) <= radius);
 }
+
+export type StopInfo = { id: number; name: string; pos: LatLng; routes: { short: string; color: string; type: number }[] };
+
+/** Stops inside a box, with the routes that call there (for the map layer). */
+export function stopsInBox(s: number, w: number, n: number, e: number, limit: number): StopInfo[] {
+  const N = load();
+  const out: StopInfo[] = [];
+  for (let i = 0; i < N.lat.length && out.length < limit; i++) {
+    if (N.lat[i] < s || N.lat[i] > n || N.lng[i] < w || N.lng[i] > e) continue;
+    const seen = new Set<number>();
+    const routes: StopInfo["routes"] = [];
+    for (const [pi, pos] of N.stopPatterns[i]) {
+      const p = N.patterns[pi];
+      if (pos === p.stops.length - 1 || seen.has(p.route)) continue; // only boarding
+      seen.add(p.route);
+      const r = N.raw.routes[p.route];
+      routes.push({ short: r[0] || "?", color: r[3], type: r[2] });
+    }
+    if (!routes.length) continue;
+    routes.sort((a, b) => a.short.localeCompare(b.short, "lt", { numeric: true }));
+    out.push({ id: i, name: N.raw.stops.name[i], pos: stopPos(N, i), routes });
+  }
+  return out;
+}
+
+export type Departure = { route: string; color: string; type: number; headsign: string; time: number };
+
+/** Next departures from a stop, from `sec` (local seconds) on `date`, within `windowSec`. */
+export function departuresFrom(stop: number, date: string, sec: number, limit = 8, windowSec = 2 * 3600): { name: string; departures: Departure[] } | null {
+  const N = load();
+  if (!Number.isInteger(stop) || stop < 0 || stop >= N.lat.length) return null;
+  const { day } = resolveDay(date);
+  const ctx = dayContext(N, day);
+  const out: Departure[] = [];
+  for (const [pi, pos] of N.stopPatterns[stop]) {
+    const p = N.patterns[pi];
+    if (pos === p.stops.length - 1) continue; // arrivals only, nobody boards at the terminus
+    const r = N.raw.routes[p.route];
+    for (const { shift, active } of ctx)
+      for (let k = 0; k < p.start.length; k++) {
+        if (!active[p.svc[k]]) continue;
+        const t = p.start[k] + p.dep[p.prof[k]][pos] + shift;
+        if (t >= sec && t <= sec + windowSec) out.push({ route: r[0] || "?", color: r[3], type: r[2], headsign: p.headsign, time: t });
+      }
+  }
+  out.sort((a, b) => a.time - b.time);
+  return { name: N.raw.stops.name[stop], departures: out.slice(0, limit) };
+}

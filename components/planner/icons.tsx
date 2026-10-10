@@ -148,3 +148,29 @@ export function ModeBadge({ mode, size = 40 }: { mode: ModeId; size?: number }) 
     </span>
   );
 }
+
+export const SunIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  </>);
+
+export const CloudIcon = ({ size = 18, className }: P) => svg(size, className, <path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z" />);
+
+export const RainIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <path d="M7 14h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 5.5 4.3 4.3 0 0 0 7 14z" />
+    <path d="m8 17-1 3M12 17l-1 3M16 17l-1 3" />
+  </>);
+
+export const SnowIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <path d="M7 13h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 4.5 4.3 4.3 0 0 0 7 13z" />
+    <path d="M8 17v.01M12 19v.01M16 17v.01M10 21v.01M14 21v.01" strokeWidth={2.6} />
+  </>);
+
+export const FogIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <path d="M7 11h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 2.5" />
+    <path d="M4 15h16M6 19h12" />
+  </>);

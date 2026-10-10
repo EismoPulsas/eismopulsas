@@ -17,6 +17,7 @@ import { scooterFleet } from "@/lib/server/scooters";
 import { parkingNear, parkingZoneAt } from "@/lib/server/parking";
 import { routeCar } from "@/lib/server/driving";
 import { planTransit, resolveDay, timetableInfo } from "@/lib/server/transit";
+import { tripWeather } from "@/lib/server/weather";
 
 const BIKE_SPEED = 16 / 3.6; // m/s
 
@@ -34,12 +35,14 @@ export async function GET(req: Request) {
   const straight = haversine(from, to);
   if (straight < 50) return Response.json({ error: "Taškai A ir B per arti vienas kito" }, { status: 400 });
 
-  const [drive, bike, walk, share, fleet] = await Promise.all([
+  const [drive, bike, walk, share, fleet, weather] = await Promise.all([
     routeCar(from, to, carDeparture(depart)),
     straight < 80_000 ? osrmRoute("bike", from, to) : null,
     straight < 25_000 ? osrmRoute("foot", from, to) : null,
     straight < 20_000 ? planBikeshare(from, to, depart.date, depart.isNow) : { result: null, note: null },
     scooterFleet(),
+    // A city trip takes well under an hour; the forecast covers the first hour or so.
+    tripWeather(from, Date.parse(depart.at), Math.min(3 * 3600, straight / 4)),
   ]);
   const scooter = straight < 20_000 ? estimateScooter(from, to, bike, fleet) : null;
 
@@ -97,6 +100,7 @@ export async function GET(req: Request) {
     transit,
     transitNote,
     timetable: { ...timetableInfo(), shifted },
+    weather,
   };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

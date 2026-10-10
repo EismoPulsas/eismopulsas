@@ -19,3 +19,6 @@
 | Vilniaus VT bilietų kainos | JUDU: `https://judu.lt/viesojo-transporto-keleiviams/bilietu-rusys-ir-kainos-3/` |
 | Kauno VT bilietų kainos | kaunas.lt: `https://www.kaunas.lt/transportas/viesasis-transportas/` |
 | Degalų kainos | LEA vidurkiai |
+| Orai kelionės pradžioje | LHMT Meteo.lt: `https://api.meteo.lt/v1/places/{vieta}/forecasts/long-term` |
+| Lietaus tikimybė | Open-Meteo: `https://api.open-meteo.com/v1/forecast?hourly=precipitation_probability` |
+| VT stotelės ir artimiausi išvykimai žemėlapyje | iš LTSA GTFS (`data/transit.json.gz`, per `/api/stops`) |
