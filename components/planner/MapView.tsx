@@ -14,18 +14,7 @@ import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
 import { FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, ZONE_COLOR, type Area, type MapPick, type Zone } from "./parking-meta";
 
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean };
-
-type Lane = { k: "A" | "A+" | "OSM"; n: string; c: LatLng[] };
-type Sensor = { name: string; road: string; pos: LatLng; speed: number; limit: number; vehicles: number };
-type StreetRef = { zi?: number; ai?: number };
-type StreetFile = {
-  segments: (StreetRef & { src: "osm" | "judu"; line: LatLng[]; name: string | null; side?: string; orientation?: string | null; fee?: string | null; maxStayMin?: number; spaces?: number | null; note?: string | null })[];
-  areas: (StreetRef & { pos: LatLng; poly: LatLng[][][] | null; name: string | null; kind: string; cap: number | null; fee: string | null; maxStayMin?: number })[];
-  points: (StreetRef & { pos: LatLng; name: string | null; spaces: number | null })[];
-  noParking: { line: LatLng[]; kind: string; name: string | null }[];
-  noZones: { name: string | null; poly: LatLng[][][] }[];
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; bikeshare: boolean; scooters: boolean };
+export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean };
 type Padding = { top: number; bottom: number };
 
 export type MapTheme = "dark" | "fiord" | "positron" | "liberty";
@@ -37,18 +26,18 @@ export const MAP_THEMES: { id: MapTheme; label: string; bg: string; light: boole
 ];
 
 type Lane = { k: "A" | "A+" | "OSM"; n: string; c: LatLng[] };
-type Zone = { city: string; zone: string; price: number; text: string; poly: LatLng[][][] };
 type ScooterFeed = { source: "gbfs" | "demo" | "none"; operator: string | null; total: number; vehicles: { id: string; pos: LatLng; battery: number | null }[] };
 type ScooterState = { feed: ScooterFeed | null; tooFar: boolean };
 type Sensor = { name: string; road: string; pos: LatLng; speed: number; limit: number; vehicles: number };
-type BikeStation = { id: string; name: string; address: string; pos: LatLng; capacity: number; bikes: number; docks: number; open: boolean };
-
-const ZONE_COLOR: Record<string, string> = {
-  "Mėlynoji zona": "#3b82f6",
-  "Raudonoji zona": "#ef4444",
-  "Geltonoji zona": "#facc15",
-  "Žalioji zona": "#22c55e",
+type StreetRef = { zi?: number; ai?: number };
+type StreetFile = {
+  segments: (StreetRef & { src: "osm" | "judu"; line: LatLng[]; name: string | null; side?: string; orientation?: string | null; fee?: string | null; maxStayMin?: number; spaces?: number | null; note?: string | null })[];
+  areas: (StreetRef & { pos: LatLng; poly: LatLng[][][] | null; name: string | null; kind: string; cap: number | null; fee: string | null; maxStayMin?: number })[];
+  points: (StreetRef & { pos: LatLng; name: string | null; spaces: number | null })[];
+  noParking: { line: LatLng[]; kind: string; name: string | null }[];
+  noZones: { name: string | null; poly: LatLng[][][] }[];
 };
+type BikeStation = { id: string; name: string; address: string; pos: LatLng; capacity: number; bikes: number; docks: number; open: boolean };
 
 const pin = (letter: string, color: string) =>
   L.divIcon({ className: "", html: `<div class="ep-pin" style="--c:${color}"><span>${letter}</span></div>`, iconSize: [34, 46], iconAnchor: [17, 46] });
@@ -372,7 +361,9 @@ export default function MapView({
   const street = useJson<StreetFile>("/data/street-parking.json", layers.parking);
   const chargersFile = useJson<{ chargers: Charger[] }>("/data/chargers.json", ev && layers.charging);
   const border = useJson<{ rings: LatLng[][] }>("/data/lithuania.json", true);
-  const [traffic, setTraffic] = useState<{ time: string; sensors: Sensor[] } | null>(null);
+  const [scooterState, setScooterState] = useState<ScooterState>({ feed: null, tooFar: false });
+  const traffic = useLive<{ time: string; sensors: Sensor[] }>("/api/traffic", layers.traffic, 5 * 60 * 1000);
+  const bikeshare = useLive<{ stations: BikeStation[] }>("/api/bikeshare", layers.bikeshare, 60 * 1000);
   const [view, setView] = useState<Viewport | null>(null);
   // Thin street pieces are hard to hit, especially by finger: accept clicks 6 px around
   // them. One renderer per map: Leaflet cannot move a renderer to a new map instance.
@@ -384,24 +375,6 @@ export default function MapView({
     L.DomEvent.stopPropagation(e.originalEvent); // the DOM click on the canvas (lines, dots)
     onPickPlace(p);
   };
-  useEffect(() => {
-    if (!layers.traffic) return;
-    let alive = true;
-    const load = () =>
-      fetch("/api/traffic")
-        .then((r) => r.json())
-        .then((d) => alive && setTraffic(d))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, 5 * 60 * 1000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [layers.traffic]);
-  const [scooterState, setScooterState] = useState<ScooterState>({ feed: null, tooFar: false });
-  const traffic = useLive<{ time: string; sensors: Sensor[] }>("/api/traffic", layers.traffic, 5 * 60 * 1000);
-  const bikeshare = useLive<{ stations: BikeStation[] }>("/api/bikeshare", layers.bikeshare, 60 * 1000);
 
   const frame = useMemo(() => {
     if (plan) {
@@ -450,6 +423,8 @@ export default function MapView({
     } catch {}
   };
   const look = MAP_THEMES.find((t) => t.id === theme) ?? MAP_THEMES[0];
+  // Above the phone results sheet, or the bottom corner on desktop; the legend sits above it.
+  const themeBottom = padding.bottom + (padding.bottom ? 10 : 24);
   const rides = plan?.transit?.legs.filter((l): l is RideLeg => l.kind === "ride") ?? [];
 
   return (
@@ -467,12 +442,6 @@ export default function MapView({
         className="h-full w-full"
         style={{ background: look.bg }}
       >
-        <TileLayer
-          attribution='Žemėlapis &copy; Esri, <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
-          maxZoom={16}
-        />
-        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}" maxZoom={16} />
         <VectorBasemap theme={theme} />
         {border && (
           <>
@@ -484,7 +453,6 @@ export default function MapView({
         )}
         <ClickHandler border={border?.rings ?? null} onPick={onPick} onOutside={onOutside} />
         <ViewportWatcher onChange={setView} />
-        <Framer points={frame.points} nonce={frame.nonce} />
         <Framer points={frame.points} nonce={frame.nonce} padding={padding} />
 
         {/* Paid street-parking zones: clicks pass through, so A/B can still be picked inside them. */}
@@ -795,13 +763,33 @@ export default function MapView({
         )}
         {to && <Marker position={to} icon={PIN_B} draggable eventHandlers={{ dragend: (e) => onMove("to", [e.target.getLatLng().lat, e.target.getLatLng().lng]) }} />}
       </MapContainer>
-
-      {(layers.parking || (ev && layers.charging)) && <Legend parking={layers.parking} charging={ev && layers.charging} zoom={zoom} />}
+      {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
+        <div
+          className="pointer-events-none absolute left-1/2 z-[500] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--bg)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
+          style={{ bottom: padding.bottom + (padding.bottom ? 56 : 70) }}
+        >
+          {scooterState.tooFar ? (
+            "Priartinkite – matysite paspirtukus"
+          ) : scooterState.feed?.source === "demo" ? (
+            <span>
+              <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b> {scooterState.feed.total} netikri paspirtukai<span className="hidden sm:inline"> – bandomieji duomenys</span>
+            </span>
+          ) : scooterState.feed?.source === "none" ? (
+            "Paspirtukų duomenų šaltinis neprijungtas"
+          ) : (
+            `${scooterState.feed?.total} paspirtukai${scooterState.feed?.operator ? ` · ${scooterState.feed.operator}` : ""}`
+          )}
+        </div>
+      )}
+      <ThemePicker theme={theme} onChange={pickTheme} bottom={themeBottom} />
+      {(layers.parking || (ev && layers.charging)) && (
+        <Legend parking={layers.parking} charging={ev && layers.charging} zoom={zoom} bottom={themeBottom + 44} />
+      )}
     </div>
   );
 }
 
-function Legend({ parking, charging, zoom }: { parking: boolean; charging: boolean; zoom: number }) {
+function Legend({ parking, charging, zoom, bottom }: { parking: boolean; charging: boolean; zoom: number; bottom: number }) {
   const zones: [string, string][] = [
     ["Mėlynoji zona", "4 €/val."],
     ["Raudonoji zona", "2,5 €/val."],
@@ -815,13 +803,14 @@ function Legend({ parking, charging, zoom }: { parking: boolean; charging: boole
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="absolute bottom-6 left-3 z-[500] rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur"
+        style={{ bottom }}
+        className="absolute left-3 z-[500] rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur"
       >
         Legenda
       </button>
     );
   return (
-    <div className="pointer-events-auto absolute bottom-6 left-3 z-[500] max-w-[230px] rounded-xl border border-[var(--line)] bg-[var(--panel)]/95 p-2.5 text-[11px] leading-snug shadow-lg backdrop-blur">
+    <div style={{ bottom }} className="pointer-events-auto absolute left-3 z-[500] max-w-[230px] rounded-xl border border-[var(--line)] bg-[var(--panel)]/95 p-2.5 text-[11px] leading-snug shadow-lg backdrop-blur">
       <button type="button" onClick={() => setOpen(false)} className="float-right -mt-1 -mr-1 rounded px-1 text-[var(--muted)] hover:text-[var(--ink)]" aria-label="Suskleisti legendą">
         ✕
       </button>
@@ -869,26 +858,6 @@ function Legend({ parking, charging, zoom }: { parking: boolean; charging: boole
           </span>
         </div>
       )}
-      {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
-        <div
-          className="pointer-events-none absolute left-1/2 z-[500] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--bg)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
-          style={{ bottom: padding.bottom + (padding.bottom ? 56 : 70) }}
-        >
-          {scooterState.tooFar ? (
-            "Priartinkite – matysite paspirtukus"
-          ) : scooterState.feed?.source === "demo" ? (
-            <span>
-              <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b> {scooterState.feed.total} netikri paspirtukai<span className="hidden sm:inline"> – bandomieji duomenys</span>
-            </span>
-          ) : scooterState.feed?.source === "none" ? (
-            "Paspirtukų duomenų šaltinis neprijungtas"
-          ) : (
-            `${scooterState.feed?.total} paspirtukai${scooterState.feed?.operator ? ` · ${scooterState.feed.operator}` : ""}`
-          )}
-        </div>
-      )}
-      {/* Above the phone results sheet, or the bottom corner on desktop. */}
-      <ThemePicker theme={theme} onChange={pickTheme} bottom={padding.bottom + (padding.bottom ? 10 : 24)} />
     </div>
   );
 }

@@ -115,10 +115,8 @@ export default function About() {
         <section>
           <h1 className="font-display text-3xl font-bold">Kaip skaičiuojame</h1>
           <p className="mt-2 text-[var(--muted)]">
-            Eismo Pulsas palygina keturis būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
-            sutaupytumėte ar prarastumėte palikę automobilį namie. Naudojame valstybės ir miestų atvirus duomenis bei TomTom eismo paslaugą, kai ji sukonfigūruota.
             Eismo Pulsas palygina būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, viešuoju dviračiu, paspirtuku, savo dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
-            sutaupytumėte ar prarastumėte palikę automobilį namie. Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų.
+            sutaupytumėte ar prarastumėte palikę automobilį namie. Naudojame valstybės ir miestų atvirus duomenis bei TomTom eismo paslaugą, kai ji sukonfigūruota.
           </p>
           <div className="lane-divider mt-6" />
         </section>

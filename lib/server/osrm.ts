@@ -19,11 +19,9 @@ export async function osrmRoute(profile: keyof typeof PROFILE, from: LatLng, to:
   const url =
     `${BASE}/${PROFILE[profile]}/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}` +
     `?overview=full&geometries=geojson${annotate ? "&annotations=duration" : ""}`;
-  try {
-    const res = await fetch(url, {
-      cache: "no-store",
   const get = () =>
     fetch(url, {
+      cache: "no-store",
       headers: { "User-Agent": "EismoPulsas/0.2 (https://github.com/EismoPulsas/eismopulsas)" },
       signal: AbortSignal.timeout(7000),
     });

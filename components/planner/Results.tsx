@@ -183,7 +183,6 @@ function Details({ plan, mode: m, parking }: { plan: PlanResponse; mode: ModeSum
   );
 }
 
-function CarDetails({ plan, mode, parking }: { plan: PlanResponse; mode: ModeSummary; parking: ParkingChoiceProps }) {
 function ScooterDetails({ plan }: { plan: PlanResponse }) {
   const sc = plan.scooter!;
   const v = sc.vehicle;
@@ -233,7 +232,7 @@ function BikeshareDetails({ plan, kcal }: { plan: PlanResponse; kcal: number }) 
   );
 }
 
-function CarDetails({ plan }: { plan: PlanResponse }) {
+function CarDetails({ plan, mode, parking }: { plan: PlanResponse; mode: ModeSummary; parking: ParkingChoiceProps }) {
   const c = plan.car!;
   const park = mode.parking;
   return (

@@ -5,23 +5,16 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { preconnect } from "react-dom";
 import { inLithuania, type LatLng } from "@/lib/geo";
-import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId } from "@/lib/metrics";
-import type { PlanResponse } from "@/lib/plan-types";
-import { Logo } from "../Logo";
-import { fmtDur, MODE_META } from "./format";
-import { GearIcon, ChevronIcon, SwapIcon } from "./icons";
-import { useLiveParking } from "./live";
-import type { Layers } from "./MapView";
-import { ParkingCard } from "./ParkingCard";
-import type { MapPick } from "./parking-meta";
-import { PlaceInput, shortLabel, type Place } from "./PlaceInput";
-import { DEFAULT_SETTINGS, rank, summarize, type ModeId, type ModeSummary, type Settings } from "@/lib/metrics";
+import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId, type ModeSummary } from "@/lib/metrics";
 import type { PlanResponse } from "@/lib/plan-types";
 import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
 import { fmtDurShort, fmtEur, MODE_META, MODE_TAB } from "./format";
 import { ChevronIcon, GearIcon, ModeBadge, SwapIcon } from "./icons";
+import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
+import { ParkingCard } from "./ParkingCard";
+import type { MapPick } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
 import { ModeList } from "./Results";
 import { Savings } from "./Savings";
@@ -78,7 +71,7 @@ export default function Planner() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ModeId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true });
+  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /** Where the car option leaves the car; null = the best one for the priority. */
@@ -98,11 +91,6 @@ export default function Planner() {
   const driving = useCarDrive(currentPlan, chosenParking, refresh, settings.maxWalkMin, !loading);
   const plan = driving.plan;
   const updatingCar = loading || driving.pending;
-
-  // Restore a shared trip from the URL (the profile restores itself).
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, bikeshare: false, scooters: false });
-  const [showSettings, setShowSettings] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   // Phones: the search card collapses to one line once there are results.
   const [editing, setEditing] = useState(true);
   const [snap, setSnap] = useState<Snap>("peek");
@@ -119,7 +107,7 @@ export default function Planner() {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  // Restore settings and a shared trip from the URL.
+  // Restore a shared trip from the URL (the profile restores itself).
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const a = parseLL(q.get("from"));
@@ -129,12 +117,6 @@ export default function Planner() {
     if (b) setTo({ pos: b, label: q.get("b") ?? `${b[0]}, ${b[1]}` });
     if (q.get("t")) setDepartAt(q.get("t"));
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch {}
-  }, [settings]);
 
   // The floating search card's height decides where the map content starts.
   useEffect(() => {
@@ -180,10 +162,9 @@ export default function Planner() {
         if (!ctrl.signal.aborted) {
           setPlan(d);
           setLoadedQuery(queryKey);
+          setEditing(false);
+          setSnap("half");
         }
-        setPlan(d);
-        setEditing(false);
-        setSnap("half");
       })
       .catch((e) => {
         if (!ctrl.signal.aborted && e.name !== "AbortError") {
@@ -269,32 +250,36 @@ export default function Planner() {
   const collapsed = !!plan && !editing;
 
   return (
-    // On phones the side panel dissolves (display: contents) so the map can sit
-    // between the search box and the results.
-    <div className="asphalt flex min-h-dvh flex-col lg:h-dvh lg:flex-row">
-      <aside className="contents border-[var(--line)] lg:order-1 lg:flex lg:w-[460px] lg:shrink-0 lg:flex-col lg:overflow-y-auto lg:border-r">
-        <header className="sticky top-0 z-[1100] order-1 flex items-center gap-3 border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur">
-          <Logo />
-          <nav className="ml-auto flex items-center gap-1 text-sm">
-            <Link href="/profilis" className="rounded-md px-2.5 py-1.5 text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)]">
-              Profilis
-            </Link>
-            <Link href="/apie" className="rounded-md px-2.5 py-1.5 text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)]">
     <div className="relative h-dvh overflow-hidden lg:flex">
       <main className="absolute inset-0 lg:relative lg:order-2 lg:flex-1" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
         <MapView
           from={from?.pos ?? null}
           to={to?.pos ?? null}
-          plan={plan}
+          plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
           selected={selected}
           layers={layers}
           picking={!!picking || !from || !to}
+          live={live}
+          ev={ev}
+          connectors={settings.connectors}
+          parkingSpot={carPark && carPark.kind !== "zone" ? { pos: carPark.navigationPos ?? carPark.pos, name: carPark.name } : null}
+          picked={picked}
           padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}
           onPick={onMapPick}
           onOutside={() => setNotice("Kol kas veikia tik Lietuvoje – pažymėkite tašką šalies viduje.")}
           onMove={(w, p) => place(w, p)}
+          onPickPlace={(p) => {
+            setPicked(p);
+            if (phone) setSnap("peek");
+          }}
         />
-        <LayerToggles layers={layers} onChange={setLayers} top={phone ? topPx : 0} />
+        <LayerToggles layers={layers} onChange={setLayers} ev={ev} top={phone ? topPx : 0} />
+        {picked && (
+          // On phones the card sits between the search card and the results sheet.
+          <div className="pointer-events-none absolute inset-x-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}>
+            <ParkingCard pick={picked} live={live} settings={settings} onClose={() => setPicked(null)} />
+          </div>
+        )}
       </main>
 
       {/* Phones: floating search card + bottom sheet over the map. Desktop: a side column. */}
@@ -305,9 +290,14 @@ export default function Planner() {
         >
           <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--bg)]/90 lg:px-4 lg:py-3 lg:backdrop-blur">
             <Logo />
-            <Link href="/apie" className="ml-auto rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
-              Kaip skaičiuojame
-            </Link>
+            <nav className="ml-auto flex items-center gap-1">
+              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+                Profilis
+              </Link>
+              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+                Kaip skaičiuojame
+              </Link>
+            </nav>
           </header>
 
           {collapsed && (
@@ -431,31 +421,7 @@ export default function Planner() {
               />
             )}
 
-          {!plan && !loading && !error && <Intro
-              onExample={(e) => {
-                setFrom(e.from);
-                setTo(e.to);
-              }}
-            />}
-
-          {plan && (
-            <>
-              {bestMode && (
-                <div className="road-sign">
-                  <div className="road-sign-inner flex items-center justify-between gap-3 py-2.5">
-                    <div>
-                      <div className="text-[11px] font-semibold tracking-wider uppercase opacity-85">Geriausias pasirinkimas</div>
-                      <div className="font-display text-lg font-bold">{MODE_META[bestMode.id].short}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="tnum font-display text-2xl font-bold">{fmtDur(bestMode.duration)}</div>
-                      {car?.feasible && bestMode.id !== "car" && (
-                        <div className="text-xs opacity-90">
-                          {bestMode.duration <= car.duration ? `${fmtDur(car.duration - bestMode.duration)} greičiau nei automobiliu` : `+${fmtDur(bestMode.duration - car.duration)} palyginti su automobiliu`}
-                        </div>
-                      )}
-                    </div>
-            {plan && !loading && (
+            {plan && (
               <>
                 <ModeStrip modes={modes} best={best} selected={selected} onSelect={selectMode} />
 
@@ -470,54 +436,23 @@ export default function Planner() {
                   </div>
                 </div>
 
-              <button type="button" disabled={loading || driving.pending} onClick={() => setRefresh((v) => v + 1)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-sm disabled:opacity-50">
-                {updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
-              </button>
-              <ModeList
-                plan={plan}
-                modes={modes}
-                best={best}
-                selected={selected}
-                onSelect={(m) => setSelected(selected === m ? null : m)}
-                parking={{ settings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
-              />
-
-              {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={settings} carDistance={plan.car.distance} />}
-
-              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-                Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
-                Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap.
-              </p>
-            </>
-          )}
-
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--panel)]/70">
-            <button type="button" onClick={() => setShowSettings(!showSettings)} className="flex w-full items-center gap-2 p-3 text-left text-sm font-semibold" aria-expanded={showSettings}>
-              <GearIcon />
-              Mano automobilis, bilietai ir kelionių dažnis
-              <ChevronIcon className={`ml-auto text-[var(--muted)] transition ${showSettings ? "rotate-180" : ""}`} />
-            </button>
-            {showSettings && (
-              <div className="border-t border-[var(--line)] p-3">
-                <p className="mb-3 text-xs text-[var(--muted)]">
-                  Elektromobilio jungtys, leidimai ir ėjimo atstumas –{" "}
-                  <Link href="/profilis" className="text-[var(--marking)] underline">
-                    profilyje
-                  </Link>
-                  .
-                </p>
-                <SettingsPanel s={settings} onChange={setSettings} />
-                <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS, priority: settings.priority })} className="mt-3 text-xs text-[var(--muted)] underline hover:text-[var(--ink)]">
-                  Atstatyti numatytuosius
+                <button type="button" disabled={updatingCar} onClick={() => setRefresh((v) => v + 1)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-sm disabled:opacity-50">
+                  {updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
                 </button>
-              </div>
-                <ModeList plan={plan} modes={modes} best={best} selected={selected} onSelect={selectMode} />
+                <ModeList
+                  plan={plan}
+                  modes={modes}
+                  best={best}
+                  selected={selected}
+                  onSelect={selectMode}
+                  parking={{ settings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
+                />
 
-                {car && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={settings} carDistance={plan.car.distance} />}
+                {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={settings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                   Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
-                  Spūstys: {plan.car?.traffic.source === "live" ? "gyvi Via Lietuva (eismoinfo.lt) jutikliai" : "piko valandų vertinimas"}. Maršrutai: OSRM / OpenStreetMap.
+                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap.
                   {plan.bikeshareNote && ` ${plan.bikeshareNote}`}
                 </p>
               </>
@@ -531,6 +466,13 @@ export default function Planner() {
               </button>
               {showSettings && (
                 <div className="border-t border-[var(--line)] p-3">
+                  <p className="mb-3 text-xs text-[var(--muted)]">
+                    Elektromobilio jungtys, leidimai ir ėjimo atstumas –{" "}
+                    <Link href="/profilis" className="text-[var(--marking)] underline">
+                      profilyje
+                    </Link>
+                    .
+                  </p>
                   <SettingsPanel s={settings} onChange={setSettings} />
                   <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS, priority: settings.priority })} className="mt-3 text-xs text-[var(--muted)] underline hover:text-[var(--ink)]">
                     Atstatyti numatytuosius
@@ -546,27 +488,6 @@ export default function Planner() {
   );
 }
 
-      <main className="relative order-3 h-[52dvh] border-y border-[var(--line)] lg:order-2 lg:h-auto lg:flex-1 lg:border-0">
-        <MapView
-          from={from?.pos ?? null}
-          to={to?.pos ?? null}
-          plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
-          selected={selected}
-          layers={layers}
-          picking={!!picking || !from || !to}
-          live={live}
-          ev={ev}
-          connectors={settings.connectors}
-          parkingSpot={carPark && carPark.kind !== "zone" ? { pos: carPark.navigationPos ?? carPark.pos, name: carPark.name } : null}
-          picked={picked}
-          onPick={onMapPick}
-          onOutside={() => setNotice("Kol kas veikia tik Lietuvoje – pažymėkite tašką šalies viduje.")}
-          onMove={(w, p) => place(w, p)}
-          onPickPlace={setPicked}
-        />
-        <LayerToggles layers={layers} onChange={setLayers} ev={ev} />
-        {picked && <ParkingCard pick={picked} live={live} settings={settings} onClose={() => setPicked(null)} />}
-      </main>
 /** One chip per mode: the whole comparison at a glance (the only thing visible when the sheet is low). */
 function ModeStrip({ modes, best, selected, onSelect }: { modes: ModeSummary[]; best: ModeId | null; selected: ModeId | null; onSelect: (m: ModeId) => void }) {
   const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
@@ -596,18 +517,13 @@ function ModeStrip({ modes, best, selected, onSelect }: { modes: ModeSummary[]; 
   );
 }
 
-function LayerToggles({ layers, onChange, ev }: { layers: Layers; onChange: (l: Layers) => void; ev: boolean }) {
-  const items: { id: keyof Layers; label: string; swatch: string }[] = [
-    { id: "lanes", label: "A juostos", swatch: "var(--lane)" },
-    { id: "traffic", label: "Gyvas eismas", swatch: "var(--wait)" },
-    { id: "parking", label: "Parkavimas", swatch: "var(--sign-blue)" },
-    // Charging points exist on the map only for cars that can use them.
-    ...(ev ? [{ id: "charging" as const, label: "Įkrovimas", swatch: "#22d3ee" }] : []),
-function LayerToggles({ layers, onChange, top }: { layers: Layers; onChange: (l: Layers) => void; top: number }) {
+function LayerToggles({ layers, onChange, ev, top }: { layers: Layers; onChange: (l: Layers) => void; ev: boolean; top: number }) {
   const items: { id: keyof Layers; label: string; short: string; swatch: string }[] = [
     { id: "lanes", label: "A juostos", short: "A", swatch: "var(--lane)" },
     { id: "traffic", label: "Gyvas eismas", short: "Eismas", swatch: "var(--wait)" },
-    { id: "parking", label: "Mokamas parkavimas", short: "P", swatch: "var(--sign-blue)" },
+    { id: "parking", label: "Parkavimas", short: "P", swatch: "var(--sign-blue)" },
+    // Charging points exist on the map only for cars that can use them.
+    ...(ev ? [{ id: "charging" as const, label: "Įkrovimas", short: "Įkrovimas", swatch: "#22d3ee" }] : []),
     { id: "bikeshare", label: "Cyclocity dviračiai", short: "Dviračiai", swatch: "#22d3ee" },
     { id: "scooters", label: "Paspirtukai", short: "Paspirtukai", swatch: "#f472b6" },
   ];
