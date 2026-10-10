@@ -218,6 +218,9 @@ export type BikeshareResult = {
   to: { name: string; pos: LatLng; docks: number | null };
   walkTo: number;
   walkFrom: number;
+  /** Street paths A → first station and last station → B. */
+  walkToGeometry?: LatLng[];
+  walkFromGeometry?: LatLng[];
   /** Ride distance between the stations. */
   ride: number;
   rideDuration: number;
@@ -237,7 +240,7 @@ export type ScooterResult = {
   source: "gbfs" | "demo" | "estimate";
   operator: string | null;
   /** The scooter we would take, if the fleet is known. */
-  vehicle: { id: string; pos: LatLng; battery: number | null; walk: number } | null;
+  vehicle: { id: string; pos: LatLng; battery: number | null; walk: number; walkGeometry?: LatLng[] } | null;
   distance: number;
   rideDuration: number;
   duration: number;
@@ -252,6 +255,10 @@ export type WalkLeg = {
   distance: number;
   start: number;
   end: number;
+  /** Street path; absent (or two points) when only the straight line is known. */
+  geometry?: LatLng[];
+  /** The walk along streets takes longer than the change allows. */
+  tight?: boolean;
 };
 
 export type RideLeg = {

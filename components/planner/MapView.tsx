@@ -803,7 +803,7 @@ export default function MapView({
           ))}
         {plan?.scooter?.vehicle && selected === "scooter" && (
           <>
-            <Polyline positions={[plan.from, plan.scooter.vehicle.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Polyline positions={plan.scooter.vehicle.walkGeometry ?? [plan.from, plan.scooter.vehicle.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
             <Marker position={plan.scooter.vehicle.pos} icon={stopIcon(MODE_META.scooter.color)}>
               <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
                 <b>{plan.scooter.source === "demo" ? "DEMO paspirtukas" : "Artimiausias paspirtukas"}</b>
@@ -816,8 +816,8 @@ export default function MapView({
         )}
         {plan?.bikeshare && selected === "bikeshare" && (
           <>
-            <Polyline positions={[plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            <Polyline positions={[plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Polyline positions={plan.bikeshare.walkToGeometry ?? [plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Polyline positions={plan.bikeshare.walkFromGeometry ?? [plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
             <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
             <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
             {[
@@ -836,7 +836,7 @@ export default function MapView({
         {plan?.transit && selected === "transit" &&
           plan.transit.legs.map((l, i) =>
             l.kind === "walk" ? (
-              <Polyline key={i} positions={[l.from, l.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+              <Polyline key={i} positions={l.geometry ?? [l.from, l.to]} pathOptions={{ color: l.tight ? "#ffb020" : "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
             ) : (
               <Fragment key={i}>
                 <Polyline positions={l.geometry} pathOptions={{ color: "#05060a", weight: 10, opacity: 0.85 }} />

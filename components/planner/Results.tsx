@@ -362,6 +362,7 @@ export function TransitTimeline({ t }: { t: TransitResult }) {
                   <WalkIcon size={15} />
                   Eiti {fmtKm(l.distance)} · {fmtDur(l.end - l.start)}
                   {l.toName && <span className="truncate">iki „{l.toName}“</span>}
+                  {l.tight && <span className="shrink-0 font-medium text-[var(--wait)]">· persėsti spėsite tik paskubėję</span>}
                 </div>
               ) : (
                 <div className="flex flex-col gap-1">

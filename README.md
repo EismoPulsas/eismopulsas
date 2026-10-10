@@ -52,7 +52,8 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 | [UNIPARK aikštelių puslapiai](https://unipark.lt/parkavimas-mieste/vilnius/), prekybos centrų svetainės | privačių aikštelių kainos |
 | OpenStreetMap (Overpass) | kitos aikštelės, stovėjimas gatvėse |
 | [Via Lietuva – įkrovimo prieigos (OCPI)](https://ev.vialietuva.lt/atviri-duomenys-1) | elektromobilių įkrovimas, gyva būsena (CC BY 4.0) |
-| [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | dviračio, pėsčiųjų ir atsarginiai automobilio maršrutai |
+| [Valhalla (FOSSGIS)](https://valhalla1.openstreetmap.de/) | dviračio, paspirtuko ir pėsčiųjų maršrutai |
+| [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | ėjimas iki stotelių ir tarp jų; atsarginiai dviračio, pėsčiųjų ir automobilio maršrutai |
 | [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
 | [Cyclocity Vilnius (GBFS)](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | dviračių nuomos stotelės ir laisvi dviračiai, gyvai |
