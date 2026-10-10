@@ -18,6 +18,8 @@ import {
   type ModeId,
   type ModeSummary,
   type OptionId,
+  TRAVEL_KINDS,
+  TRAVEL_OF,
 } from "@/lib/metrics";
 import { estimateStay, type StayEstimate } from "@/lib/stay";
 import type { PlanResponse } from "@/lib/plan-types";
@@ -30,15 +32,15 @@ import type { Layers } from "./MapView";
 import { ParkingCard } from "./ParkingCard";
 import type { MapPick } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
-import { HybridCard, hybridTitle, MoreHybrids, StayLine } from "./HybridCard";
+import { HybridCard, hybridTitle, MoreHybrids, StayLine, HybridExtras } from "./HybridCard";
+import { TripCard, tripFromHybrid, tripFromMode } from "./TripCard";
 import { usualTrip, useHabits } from "./habits";
 import { ModeExtras, signals, type Signals } from "./Results";
-import { Savings } from "./Savings";
 import { useSettings } from "./settings";
 import { useCarDrive } from "./useCarDrive";
 import { useHybrids } from "./useHybrids";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
-import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps } from "./Trip";
+import { LiveStatus, ModeMatrix, NowClock, TransportPicker } from "./Trip";
 import { WeatherCard } from "./Weather";
 
 /** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
@@ -71,6 +73,9 @@ async function reverse(p: LatLng): Promise<{ label: string; cat?: string }> {
   return { label: `${p[0].toFixed(4)}, ${p[1].toFixed(4)}` };
 }
 
+/** "Švarco g., Vilnius" → "Švarco g." for compact lines. */
+const placeShort = (label: string) => label.split(",")[0].trim() || label;
+
 const parseLL = (s: string | null): LatLng | null => {
   const m = /^(-?[\d.]+),(-?[\d.]+)$/.exec(s ?? "");
   return m ? [+m[1], +m[2]] : null;
@@ -92,7 +97,6 @@ export default function Planner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OptionId | null>(null);
-  const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
   const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false, stops: true });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -114,7 +118,12 @@ export default function Planner() {
     if (stayPick?.key === queryKey) return { hours: stayPick.hours, reason: "jūsų pasirinkimas", source: "override" };
     return estimateStay({ to: to.pos, cat: to.cat, weekday: currentPlan.depart.weekday, arriveSec, habits, profileHours: settings.parkingHours });
   }, [currentPlan, to, stayPick, queryKey, arriveSec, habits, settings.parkingHours]);
-  const tripSettings = useMemo(() => (stay ? { ...settings, parkingHours: stay.hours } : settings), [settings, stay]);
+  // "Mano transportas" narrows what is compared and what the car is combined with.
+  const travel = settings.travel?.length ? settings.travel : TRAVEL_KINDS;
+  const tripSettings = useMemo(() => {
+    const base = stay ? { ...settings, parkingHours: stay.hours } : settings;
+    return { ...base, hybridModes: travel.includes("car") ? base.hybridModes.filter((k) => travel.includes(TRAVEL_OF[k])) : [] };
+  }, [settings, stay, travel]);
   // Refreshed driving times must not silently change the chosen destination.
   const chosenParking = useMemo(() => {
     if (!currentPlan?.car) return undefined;
@@ -213,9 +222,9 @@ export default function Planner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, refresh]);
 
-  const modes = useMemo(() => (plan ? summarize(plan, tripSettings, chosenParking?.id).map((m) =>
+  const modes = useMemo(() => (plan ? summarize(plan, tripSettings, chosenParking?.id).filter((m) => travel.includes(TRAVEL_OF[m.id])).map((m) =>
     m.id === "car" && (updatingCar || driving.error) ? { ...m, feasible: false, why: driving.error ?? "Atnaujinamas važiavimo laikas…" } : m) : []),
-    [plan, tripSettings, chosenParking?.id, updatingCar, driving.error]);
+    [plan, tripSettings, chosenParking?.id, updatingCar, driving.error, travel]);
   // Car + second leg: leave the car on the way (P+R, cheap parking, a charger) and continue.
   const hybridState = useHybrids(currentPlan, tripSettings, !loading);
   const hybrids = useMemo(() => (plan && hybridState.options.length ? summarizeHybrids(plan, hybridState.options, tripSettings) : []), [plan, hybridState.options, tripSettings]);
@@ -232,13 +241,11 @@ export default function Planner() {
   const selectedHybrid = isHybridId(selected) ? hybrids.find((h) => h.id === selected) : undefined;
   const carPark = modes.find((m) => m.id === "car")?.parking?.option;
 
-  // Open the winner (once combinations are in) and compare the car against the best alternative.
+  // Open the winner once combinations are in.
   useEffect(() => {
     if (!plan || !hybridState.settled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelected((prev) => (prev && !isHybridId(prev) ? prev : null) ?? ranking.best);
-    const alts = [...ranking.scores].filter(([id]) => id !== "car" && !isHybridId(id)).sort((a, b) => a[1] - b[1]);
-    if (alts.length) setAlt(alts[0][0] as Exclude<ModeId, "car">);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basePlan, hybridState.settled]);
 
@@ -323,8 +330,20 @@ export default function Planner() {
   const bestMode = isHybridId(best) ? null : best;
   const bestHybrid = isHybridId(best) ? hybrids.find((h) => h.id === best) : undefined;
   const car = modes.find((m) => m.id === "car");
-  const sel = isHybridId(selected) ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === bestMode) ?? null);
+  // A combination that disappeared (e.g. the car was switched off) falls back to the best single way.
+  const sel = selectedHybrid ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === bestMode) ?? null);
   const collapsed = !!plan && !editing;
+  const labels = { from: placeShort(from?.label ?? "A"), to: placeShort(to?.label ?? "B") };
+  // "Alternatyva" under the trip card: the next best option by the same ranking.
+  const currentId = selectedHybrid?.id ?? sel?.id ?? null;
+  const altId = [...ranking.scores].sort((a, b) => a[1] - b[1]).map(([id]) => id).find((id) => id !== currentId);
+  const altHybrid = isHybridId(altId) ? hybrids.find((h) => h.id === altId) : undefined;
+  const altMode = altId && !isHybridId(altId) ? modes.find((m) => m.id === altId) : undefined;
+  const alt2 = altHybrid
+    ? { label: hybridTitle(altHybrid), duration: altHybrid.duration, onPick: () => selectMode(altHybrid.id) }
+    : altMode
+      ? { label: MODE_META[altMode.id].short, duration: altMode.duration, onPick: () => selectMode(altMode.id) }
+      : null;
 
   return (
     <div className="relative h-dvh overflow-hidden">
@@ -496,6 +515,7 @@ export default function Planner() {
               </div>
               {picking && <p className="mt-2 text-xs text-[var(--marking)]">Bakstelėkite žemėlapyje, kur yra {picking === "from" ? "A" : "B"} taškas.</p>}
             </div>
+            <TransportPicker value={travel} current={selectedHybrid ? "car" : sel ? TRAVEL_OF[sel.id] : null} onChange={(t) => setSettings({ ...settings, travel: t })} />
           </div>
         </div>
 
@@ -538,7 +558,7 @@ export default function Planner() {
             {plan && (
               <>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="eyebrow">Multimodalinė matrica</span>
+                  <span id="ep-matrix" className="eyebrow scroll-mt-24">Multimodalinė matrica</span>
                   {best && (
                     <span className="rounded-full border border-[#a7f3d0] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--marking)]">
                       Rekomenduojama: {bestHybrid ? hybridTitle(bestHybrid) : bestMode ? MODE_META[bestMode].short : ""}
@@ -571,11 +591,11 @@ export default function Planner() {
 
                 {plan.weather && <WeatherCard w={plan.weather} />}
                 <ModeMatrix plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} onSelect={selectMode} />
-                {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
+                {stay && plan.car && settings.hasCar && travel.includes("car") && <StayLine stay={stay} onPick={pickStay} />}
 
                 {/* Car + second leg (P+R, VT, Cyclocity, scooter): the best one open, the rest folded. */}
                 {topHybrid ? (
-                  <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
+                  <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} details={false} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
                 ) : !hybridState.settled && settings.hasCar ? (
                   <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--line)] px-3 py-2.5 text-sm text-[var(--muted)]" role="status">
                     <span className="traffic-light scale-75" aria-hidden>
@@ -590,26 +610,29 @@ export default function Planner() {
                   items={moreHybrids}
                   selected={selected}
                   onSelect={selectMode}
-                  render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open sig={sig} onSelect={() => selectMode(h.id)} />}
+                  render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open details={false} sig={sig} onSelect={() => selectMode(h.id)} />}
                 />
                 {hybridState.note && hybrids.length > 0 && <p className="text-[11px] text-[var(--muted)]">{hybridState.note}</p>}
                 {!plan.transit && plan.transitNote && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
 
-                {sel && (
+                {/* The chosen way, in full: legs on a timeline, live availability, navigation. */}
+                {(selectedHybrid || sel) && <div className="border-t border-[var(--line)]" />}
+                {selectedHybrid ? (
                   <>
-                    <div className="border-t border-[var(--line)]" />
-                    <ImpactTiles modes={modes} sel={sel} />
-                    {sel.feasible && <RouteSteps plan={plan} mode={sel} toLabel={to?.label ?? "B"} />}
+                    <TripCard trip={tripFromHybrid(plan, selectedHybrid, hybridTitle(selectedHybrid), labels)} car={car} live={plan.depart.isNow} alt={alt2} />
+                    <HybridExtras h={selectedHybrid} car={car} />
+                  </>
+                ) : sel ? (
+                  <>
+                    {sel.feasible && <TripCard trip={tripFromMode(plan, sel, labels)} car={car} live={plan.depart.isNow} alt={alt2} />}
                     <ModeExtras
                       plan={plan}
                       mode={sel}
                       parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
                     />
-                    {sel.feasible && <NavButton plan={plan} mode={sel.id} className="lg:hidden" />}
                   </>
-                )}
+                ) : null}
 
-                {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={tripSettings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                   Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
@@ -644,11 +667,6 @@ export default function Planner() {
             <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
           </div>
         </BottomSheet>
-        {plan && sel?.feasible && (
-          <div className="sticky bottom-0 z-20 mt-auto hidden bg-gradient-to-t from-[var(--panel)] from-60% to-transparent px-6 pt-6 pb-5 lg:block">
-            <NavButton plan={plan} mode={sel.id} />
-          </div>
-        )}
       </aside>
     </div>
   );

@@ -1,12 +1,10 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-import { wazeNavigationUrl } from "@/lib/driving";
-import type { ModeId, ModeSummary } from "@/lib/metrics";
+import { useSyncExternalStore } from "react";
+import { TRAVEL_KINDS, type ModeId, type ModeSummary, type TravelKind } from "@/lib/metrics";
 import type { PlanResponse } from "@/lib/plan-types";
-import { DEMO } from "./demo";
-import { fmtClock, fmtCo2, fmtDur, fmtDurShort, fmtEur, fmtKm, fmtNum, ROUTE_TYPE } from "./format";
-import { ChevronIcon, ClockIcon, CoinIcon, FlameIcon, LeafIcon, ModeBadge } from "./icons";
+import { fmtCo2, fmtDurShort, fmtEur } from "./format";
+import { ClockIcon, ModeBadge } from "./icons";
 import { signals } from "./Results";
 
 type Tone = "go" | "wait" | "stop" | "blue" | "pink" | "cyan" | "muted";
@@ -20,19 +18,6 @@ const TONE: Record<Tone, { bg: string; border: string; text: string; dot: string
   cyan: { bg: "#ecfeff", border: "#a5f3fc", text: "#0e7490", dot: "#06b6d4" },
   muted: { bg: "var(--chip)", border: "var(--line)", text: "var(--ink)", dot: "var(--muted)" },
 };
-
-function Chip({ text, tone, dot, mono }: { text: string; tone: Tone; dot?: boolean; mono?: boolean }) {
-  const t = TONE[tone];
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${mono ? "font-mono" : ""}`}
-      style={{ background: t.bg, borderColor: t.border, color: t.text }}
-    >
-      {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ background: t.dot }} />}
-      {text}
-    </span>
-  );
-}
 
 /* ------------------------------------------------------------------ matrix */
 
@@ -123,224 +108,6 @@ export function ModeMatrix({
   );
 }
 
-/* ------------------------------------------------------------------ impact tiles */
-
-function Tile({ label, value, tone, icon }: { label: string; value: string; tone: Tone; icon: React.ReactNode }) {
-  const t = TONE[tone];
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border p-3.5" style={{ background: t.bg, borderColor: t.border }}>
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/70" style={{ color: t.dot }}>
-        {icon}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">{label}</span>
-        <span className="block font-mono text-[13px] leading-tight font-semibold sm:text-[15px]" style={{ color: t.text }}>
-          {value}
-        </span>
-      </span>
-    </div>
-  );
-}
-
-/** What the chosen way does for the climate and for you, against driving. */
-export function ImpactTiles({ modes, sel }: { modes: ModeSummary[]; sel: ModeSummary }) {
-  const car = modes.find((m) => m.id === "car" && m.feasible);
-  const co2 =
-    sel.id === "car"
-      ? { label: "Išmesite CO₂", value: `${fmtCo2(sel.co2)} CO₂`, tone: "wait" as Tone }
-      : car && car.co2 > sel.co2
-        ? { label: "Sutaupyta CO₂", value: `−${fmtCo2(car.co2 - sel.co2)} CO₂`, tone: "go" as Tone }
-        : { label: "CO₂", value: `${sel.co2 < 0.001 ? "0 g" : fmtCo2(sel.co2)} CO₂`, tone: "go" as Tone };
-  return (
-    <div className="grid grid-cols-2 gap-2.5">
-      <Tile {...co2} icon={<LeafIcon size={20} />} />
-      {sel.kcal >= 5 ? (
-        <Tile label="Sudeginsite" value={`≈ ${fmtNum(sel.kcal)} kcal`} tone="wait" icon={<FlameIcon size={20} />} />
-      ) : (
-        <Tile label="Kaina" value={sel.cost < 0.005 ? "0 €" : fmtEur(sel.cost)} tone="blue" icon={<CoinIcon size={20} />} />
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ steps */
-
-type Chip = { text: string; tone: Tone; dot?: boolean; mono?: boolean };
-type Step = { title: string; sub?: string; dur?: number; chips?: Chip[] };
-
-const walkSec = (m: number) => m / 1.25;
-
-function buildSteps(plan: PlanResponse, m: ModeSummary, toLabel: string): Step[] {
-  const arrive: Step = { title: "Atvykimas", sub: toLabel };
-  switch (m.id) {
-    case "car": {
-      const c = plan.car!;
-      const p = m.parking;
-      const d = c.drive.traffic.delaySeconds;
-      return [
-        {
-          title: "Važiuoti automobiliu",
-          sub: `${fmtKm(c.drive.distance)}${p ? ` iki „${p.option.name}“` : ""}`,
-          dur: c.drive.duration,
-          chips: [d !== null && d > 60 ? { text: `Spūstys +${fmtDur(d)}`, tone: "stop", dot: true } : { text: "Eismas laisvas", tone: "go", dot: true }],
-        },
-        p
-          ? {
-              title: `Pastatyti: ${p.option.name}`,
-              sub: p.costNote || undefined,
-              dur: p.searchSec,
-              chips: [
-                { text: p.cost == null ? "Kaina nežinoma" : p.cost === 0 ? "Nemokamai" : fmtEur(p.cost), tone: p.cost ? "wait" : "go", dot: true },
-                ...(p.chanceText ? [{ text: p.chanceText, tone: "muted" as Tone }] : []),
-              ],
-            }
-          : { title: "Rasti vietą automobiliui", dur: Math.max(0, c.overhead - 120) },
-        { title: "Eiti iki tikslo", sub: p && p.option.walk > 0 ? `${fmtKm(p.option.walk)} pėsčiomis` : toLabel, dur: p?.walkSec },
-      ];
-    }
-    case "transit": {
-      const steps: Step[] = [];
-      for (const l of plan.transit!.legs) {
-        if (l.kind === "walk") {
-          if (l.distance < 30) continue;
-          steps.push({
-            title: l.toName ? `Eiti iki „${l.toName}“` : "Eiti iki tikslo",
-            sub: fmtKm(l.distance),
-            dur: l.end - l.start,
-            chips: l.tight ? [{ text: "Persėsti spėsite tik paskubėję", tone: "wait", dot: true }] : undefined,
-          });
-        } else {
-          steps.push({
-            title: `${ROUTE_TYPE[l.route.type] ?? "Maršrutas"} ${l.route.short} → ${l.headsign || l.route.long}`,
-            sub: `${l.from.name} → ${l.to.name} · išvyksta ${fmtClock(l.dep)}`,
-            dur: l.arr - l.dep,
-            chips: [
-              { text: `${l.stops} st.`, tone: "blue", mono: true },
-              { text: `Išlipti ${fmtClock(l.arr)}`, tone: "muted", mono: true },
-              ...(l.laneMeters > 100 ? [{ text: `A juosta ${fmtKm(l.laneMeters)}`, tone: "go" as Tone, dot: true }] : []),
-            ],
-          });
-        }
-      }
-      return [...steps, arrive];
-    }
-    case "bikeshare": {
-      const b = plan.bikeshare!;
-      return [
-        {
-          title: `Paimti dviratį stotelėje „${b.from.name}“`,
-          sub: `Cyclocity stotelė · ${fmtKm(b.walkTo)} pėsčiomis`,
-          dur: walkSec(b.walkTo),
-          chips: [{ text: b.from.bikes == null ? "Dviračių skaičius nežinomas" : `${b.from.bikes} laisvi dviračiai`, tone: "wait", dot: true }],
-        },
-        { title: `${fmtKm(b.ride)} dviračiu`, sub: DEMO.bikeRideNote, dur: b.rideDuration, chips: DEMO.bikeRideChips.map((text) => ({ text, tone: "muted" as Tone, mono: true })) },
-        {
-          title: `Pastatyti stotelėje „${b.to.name}“`,
-          sub: `Tada ${fmtKm(b.walkFrom)} pėsčiomis iki tikslo`,
-          dur: walkSec(b.walkFrom),
-          chips: [{ text: b.to.docks == null ? "Vietų skaičius nežinomas" : `${b.to.docks} laisvos vietos`, tone: "go", dot: true }],
-        },
-      ];
-    }
-    case "scooter": {
-      const s = plan.scooter!;
-      const v = s.vehicle;
-      return [
-        v
-          ? {
-              title: "Eiti iki paspirtuko",
-              sub: `${fmtKm(v.walk)}${s.operator ? ` · ${s.operator}` : ""}`,
-              dur: walkSec(v.walk),
-              chips: [...(v.battery !== null ? [{ text: `Baterija ${v.battery} %`, tone: (v.battery < 25 ? "stop" : "go") as Tone, dot: true }] : []), ...(s.source === "demo" ? [{ text: "DEMO", tone: "pink" as Tone }] : [])],
-            }
-          : { title: "Rasti ir atrakinti paspirtuką", sub: "Artimiausio paspirtuko vieta nežinoma", dur: 180 },
-        { title: `${fmtKm(s.distance)} paspirtuku`, sub: DEMO.scooterRideNote, dur: s.rideDuration },
-        { title: "Pastatyti paspirtuką", sub: toLabel, dur: 60 },
-      ];
-    }
-    case "bike":
-      return [{ title: `${fmtKm(m.distance)} dviračiu`, sub: DEMO.bikeRideNote, dur: m.duration, chips: DEMO.bikeRideChips.map((text) => ({ text, tone: "muted" as Tone, mono: true })) }, arrive];
-    case "walk":
-      return [{ title: `${fmtKm(m.distance)} pėsčiomis`, dur: m.duration }, arrive];
-  }
-}
-
-const STEP_COLOR = (i: number, n: number) => (i === 0 ? "#f59e0b" : i === n - 1 ? "#ef4444" : "#10b981");
-
-/** The chosen way, leg by leg. */
-export function RouteSteps({ plan, mode, toLabel }: { plan: PlanResponse; mode: ModeSummary; toLabel: string }) {
-  const [open, setOpen] = useState(true);
-  const steps = buildSteps(plan, mode, toLabel);
-  return (
-    <section className="flex flex-col gap-3">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center gap-2 text-left">
-        <ChevronIcon className={`shrink-0 text-[var(--marking)] transition ${open ? "" : "-rotate-90"}`} />
-        <span className="font-display text-[15px] font-bold tracking-wide uppercase">Maršruto etapai</span>
-        <span className="ml-auto font-mono text-sm text-[var(--muted)]">
-          {fmtKm(mode.distance)} • {fmtDurShort(mode.duration)}
-        </span>
-      </button>
-      {open && (
-        <ol className="flex flex-col">
-          {steps.map((s, i) => (
-            <li key={i} className="flex gap-3">
-              <div className="flex w-6 shrink-0 flex-col items-center">
-                <span className="grid h-6 w-6 place-items-center rounded-full text-xs font-bold text-white ring-4 ring-[var(--panel)]" style={{ background: STEP_COLOR(i, steps.length) }}>
-                  {i + 1}
-                </span>
-                {i < steps.length - 1 && <span className="w-0.5 flex-1 bg-[var(--go)]/40" />}
-              </div>
-              <div className="mb-3 min-w-0 flex-1 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3.5 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-                <div className="flex items-baseline justify-between gap-3">
-                  <b className="min-w-0 text-[15px] font-semibold">{s.title}</b>
-                  {s.dur != null && <span className="shrink-0 font-mono text-xs text-[var(--muted)]">{fmtDurShort(s.dur)}</span>}
-                </div>
-                {s.sub && <p className="mt-1 text-sm text-[var(--muted)]">{s.sub}</p>}
-                {s.chips && s.chips.length > 0 && (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    {s.chips.map((c, j) => (
-                      <Chip key={j} {...c} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ navigation */
-
-const GMAPS_MODE: Record<Exclude<ModeId, "car">, string> = { transit: "transit", bikeshare: "bicycling", scooter: "bicycling", bike: "bicycling", walk: "walking" };
-
-/** Hands the chosen way to a navigation app: Waze for driving, Google Maps for the rest. */
-export function NavButton({ plan, mode, className = "" }: { plan: PlanResponse; mode: ModeId; className?: string }) {
-  const href =
-    mode === "car"
-      ? plan.car
-        ? wazeNavigationUrl(plan.car.drive)
-        : null
-      : `https://www.google.com/maps/dir/?api=1&origin=${plan.from.join(",")}&destination=${plan.to.join(",")}&travelmode=${GMAPS_MODE[mode]}`;
-  if (!href) return null;
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`flex items-center justify-center gap-2.5 rounded-2xl bg-[var(--marking)] py-4 text-base font-semibold text-white shadow-[0_8px_20px_rgba(5,150,105,0.3)] transition hover:brightness-110 ${className}`}
-    >
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M3 11l19-9-9 19-2-8-8-2z" />
-      </svg>
-      Pradėti navigaciją
-      <span className="sr-only">{mode === "car" ? "(Waze)" : "(Google Maps)"}</span>
-    </a>
-  );
-}
-
 /* ------------------------------------------------------------------ header bits */
 
 const subscribeMinute = (cb: () => void) => {
@@ -379,5 +146,70 @@ export function LiveStatus({ departAt }: { departAt: string | null }) {
         )}
       </span>
     </span>
+  );
+}
+
+/* ------------------------------------------------------------------ my transport */
+
+const TRAVEL_META: Record<TravelKind, { icon: string; label: string }> = {
+  car: { icon: "🚗", label: "Automobilis" },
+  transit: { icon: "🚌", label: "Viešasis tr." },
+  bike: { icon: "🚲", label: "Dviratis" },
+  scooter: { icon: "🛴", label: "Paspirtukas" },
+  walk: { icon: "🚶", label: "Pėsčiomis" },
+};
+const ECO: TravelKind[] = TRAVEL_KINDS.filter((k) => k !== "car");
+const same = (a: TravelKind[], b: TravelKind[]) => a.length === b.length && a.every((k) => b.includes(k));
+
+/** "Mano transportas": which ways to compare and combine. The way on the chosen card is filled. */
+export function TransportPicker({ value, current, onChange }: { value: TravelKind[]; current: TravelKind | null; onChange: (t: TravelKind[]) => void }) {
+  const toggle = (k: TravelKind) => {
+    const next = value.includes(k) ? value.filter((x) => x !== k) : TRAVEL_KINDS.filter((x) => x === k || value.includes(x));
+    if (next.length) onChange(next); // at least one way stays on
+  };
+  const preset = (label: string, kinds: TravelKind[]) => (
+    <button type="button" onClick={() => onChange(kinds)} className={`font-semibold ${same(value, kinds) ? "text-[var(--marking)]" : "text-[var(--muted)] hover:text-[var(--ink)]"}`} aria-pressed={same(value, kinds)}>
+      {label}
+    </button>
+  );
+  return (
+    <section aria-label="Mano transportas" className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
+        <span className="eyebrow">Mano transportas</span>
+        <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--marking)]">{value.length} aktyvūs</span>
+        <span className="ml-auto flex items-center gap-2 text-xs">
+          {preset("Visi", TRAVEL_KINDS)}
+          <span className="text-[var(--line)]">•</span>
+          {preset("Tik ekologiški", ECO)}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {TRAVEL_KINDS.map((k) => {
+          const on = value.includes(k);
+          const chosen = on && current === k;
+          return (
+            <button
+              key={k}
+              type="button"
+              role="switch"
+              aria-checked={on}
+              onClick={() => toggle(k)}
+              title={on ? "Neįtraukti" : "Įtraukti"}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                chosen
+                  ? "border-[var(--marking)] bg-[var(--marking)] text-white"
+                  : on
+                    ? "border-[#a7f3d0] bg-[var(--accent-soft)] text-[var(--ink)]"
+                    : "border-[var(--line)] bg-[var(--panel)] text-[var(--muted)] line-through decoration-1 opacity-70"
+              }`}
+            >
+              <span aria-hidden>{TRAVEL_META[k].icon}</span>
+              {TRAVEL_META[k].label}
+              {on && <span className={`h-1.5 w-1.5 rounded-full ${chosen ? "bg-white" : "bg-[var(--go)]"}`} />}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
