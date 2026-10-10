@@ -363,17 +363,20 @@ export function NowClock({ departAt }: { departAt: string | null }) {
 
 export function LiveStatus({ departAt }: { departAt: string | null }) {
   return (
-    <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-[var(--muted)]">
-      <span className={`h-2 w-2 rounded-full ${departAt ? "bg-[var(--wait)]" : "bg-[var(--go)]"}`} />
-      {departAt ? (
-        <>
-          Planuojama: <b className="text-[var(--ink)]">{departAt.replace("T", " ").slice(5)}</b>
-        </>
-      ) : (
-        <>
-          Realiu laiku: <b className="text-[var(--marking)]">Aktyvu</b>
-        </>
-      )}
+    <span className="flex min-w-0 items-center gap-1.5 text-xs whitespace-nowrap text-[var(--muted)]">
+      <span className={`h-2 w-2 shrink-0 rounded-full ${departAt ? "bg-[var(--wait)]" : "bg-[var(--go)]"}`} />
+      {/* The one part of the header that may shrink (with "…") when space runs out. */}
+      <span className="min-w-0 truncate">
+        {departAt ? (
+          <>
+            Planuojama: <b className="text-[var(--ink)]">{departAt.replace("T", " ").slice(5)}</b>
+          </>
+        ) : (
+          <>
+            Realiu laiku: <b className="text-[var(--marking)]">Aktyvu</b>
+          </>
+        )}
+      </span>
     </span>
   );
 }

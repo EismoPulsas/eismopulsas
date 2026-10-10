@@ -323,16 +323,16 @@ export default function Planner() {
           ref={topRef}
           className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--panel)]/95 shadow-xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
         >
-          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur">
+          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:gap-2 lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur">
             <Logo />
-            <span className="ml-auto hidden lg:flex">
+            <span className="ml-auto hidden min-w-0 lg:flex">
               <LiveStatus departAt={departAt} />
             </span>
-            <nav className="ml-auto flex items-center gap-1 lg:ml-1">
-              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
+            <nav className="ml-auto flex shrink-0 items-center gap-0.5 lg:ml-0">
+              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-1.5 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Profilis
               </Link>
-              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
+              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-1.5 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Kaip skaičiuojame
               </Link>
             </nav>
