@@ -71,7 +71,7 @@ export default function Planner() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ModeId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, bikeshare: false });
+  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, bikeshare: false, scooters: false });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // Phones: the search card collapses to one line once there are results.
@@ -80,6 +80,15 @@ export default function Planner() {
   const [sheetPx, setSheetPx] = useState(156);
   const [topPx, setTopPx] = useState(0);
   const topRef = useRef<HTMLDivElement>(null);
+  const [phone, setPhone] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    const update = () => setPhone(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   // Restore settings and a shared trip from the URL.
   useEffect(() => {
@@ -227,12 +236,12 @@ export default function Planner() {
           selected={selected}
           layers={layers}
           picking={!!picking || !from || !to}
-          padding={{ top: topPx, bottom: sheetPx }}
+          padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}
           onPick={onMapPick}
           onOutside={() => setNotice("Kol kas veikia tik Lietuvoje – pažymėkite tašką šalies viduje.")}
           onMove={(w, p) => place(w, p)}
         />
-        <LayerToggles layers={layers} onChange={setLayers} top={topPx} />
+        <LayerToggles layers={layers} onChange={setLayers} top={phone ? topPx : 0} />
       </main>
 
       {/* Phones: floating search card + bottom sheet over the map. Desktop: a side column. */}
@@ -454,6 +463,7 @@ function LayerToggles({ layers, onChange, top }: { layers: Layers; onChange: (l:
     { id: "traffic", label: "Gyvas eismas", short: "Eismas", swatch: "var(--wait)" },
     { id: "parking", label: "Mokamas parkavimas", short: "P", swatch: "var(--sign-blue)" },
     { id: "bikeshare", label: "Cyclocity stotelės", short: "Dviračiai", swatch: "#22d3ee" },
+    { id: "scooters", label: "Paspirtukai", short: "Paspirtukai", swatch: "#f472b6" },
   ];
   return (
     <div className="absolute right-2 z-[500] flex flex-col items-end gap-1.5 lg:top-3 lg:right-3" style={{ top: top ? top + 8 : undefined }}>

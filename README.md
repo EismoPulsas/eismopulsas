@@ -16,7 +16,8 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 - **Viešasis transportas:** visos Lietuvos tvarkaraščiai (miestai, rajonai, tarpmiestiniai), RAPTOR maršrutizavimas su
   persėdimais, kiek kelio eina gatvėmis su A juosta, bilieto kaina pagal miestą, kitas reisas
 - **Cyclocity dviratis (Vilnius):** gyvi GBFS duomenys – artimiausia stotelė su laisvu dviračiu, stotelė prie B su laisva vieta
-- **Paspirtukas:** vertinimas (Bolt ir kt. Lietuvoje atvirų GBFS duomenų neskelbia), kainą galima pasikeisti
+- **Paspirtukai:** žemėlapio sluoksnis ir maršrutas iki artimiausio paspirtuko. Tikrų duomenų kol kas nėra (Bolt ir kt.
+  Lietuvoje atvirų GBFS neskelbia), todėl preview aplinkoje rodomi aiškiai pažymėti **DEMO** duomenys – žr. „Paspirtukų duomenys“
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
 - **Telefone:** žemėlapis per visą ekraną, kompaktiška paieška viršuje, tempiamas rezultatų skydelis
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
@@ -63,12 +64,27 @@ npm run data -- transit   # tik dalis: transit | lanes | parking | border
 Tvarkaraščiai galioja 6 savaites nuo paruošimo dienos (vėlesnei datai imama ta pati savaitės diena), todėl
 `npm run data -- transit` verta paleisti bent kartą per mėnesį. Atsisiuntimai talpinami `.cache/`.
 
+## Paspirtukų duomenys
+
+`lib/server/scooters.ts` skaito bet kurį GBFS srautą. Aplinkos kintamieji (Vercel → Settings → Environment Variables):
+
+| Kintamasis | Reikšmė |
+|---|---|
+| `SCOOTER_GBFS_URL` | operatoriaus `free_bike_status` (GBFS 2) arba `vehicle_status` (GBFS 3) adresas |
+| `SCOOTER_GBFS_TOKEN` | jei srautui reikia `Bearer` žetono (niekada nekelkite jo į kodą) |
+| `SCOOTER_OPERATOR` | pavadinimas žemėlapyje, pvz. `Bolt` |
+| `SCOOTER_DEMO` | `1` – rodyti demo net produkcijoje, `0` – niekur nerodyti |
+
+Be `SCOOTER_GBFS_URL` demo duomenys (išgalvoti paspirtukai prie tikrų gatvių) rodomi tik `npm run dev` ir Vercel
+preview aplinkose – produkcijoje jų nėra, nebent `SCOOTER_DEMO=1`. Visur jie pažymėti „DEMO“.
+
 ## API
 
 ```
 GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876[&depart=2026-10-12T08:00]
 GET /api/traffic
 GET /api/bikeshare
+GET /api/scooters?bbox=54.66,25.24,54.70,25.32
 GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 ```
 
@@ -82,9 +98,10 @@ GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 - `lib/server/transit.ts` – RAPTOR maršrutizatorius per `data/transit.json.gz`
 - `lib/server/traffic.ts` – eismoinfo.lt jutikliai ir piko valandų vertinimas
 - `lib/server/osrm.ts`, `lanes.ts`, `parking.ts` – gatvių maršrutai, A juostos, parkavimo zonos
-- `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko vertinimas
+- `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko maršrutas
+- `lib/server/scooters.ts` – paspirtukų srautas (GBFS arba DEMO)
 - `components/planner/BottomSheet.tsx` – tempiamas rezultatų skydelis telefone
-- `app/api/*` – `plan`, `traffic`, `bikeshare`, `geocode`
+- `app/api/*` – `plan`, `traffic`, `bikeshare`, `scooters`, `geocode`
 - `scripts/build-data.mjs` – duomenų paruošimas
 
 ## Darbo tvarka

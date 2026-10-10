@@ -9,11 +9,13 @@ import type { ModeId } from "@/lib/metrics";
 import type { PlanResponse, RideLeg } from "@/lib/plan-types";
 import { fmtClock, MODE_META } from "./format";
 
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; bikeshare: boolean };
+export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; bikeshare: boolean; scooters: boolean };
 type Padding = { top: number; bottom: number };
 
 type Lane = { k: "A" | "A+" | "OSM"; n: string; c: LatLng[] };
 type Zone = { city: string; zone: string; price: number; text: string; poly: LatLng[][][] };
+type ScooterFeed = { source: "gbfs" | "demo" | "none"; operator: string | null; total: number; vehicles: { id: string; pos: LatLng; battery: number | null }[] };
+type ScooterState = { feed: ScooterFeed | null; tooFar: boolean };
 type Station = { id: string; name: string; pos: LatLng; capacity: number; bikes: number | null; docks: number | null; renting: boolean };
 type Sensor = { name: string; road: string; pos: LatLng; speed: number; limit: number; vehicles: number };
 
@@ -79,6 +81,60 @@ function Framer({ points, nonce, padding }: { points: LatLng[]; nonce: string; p
   return null;
 }
 
+const SCOOTER_MIN_ZOOM = 12;
+
+/** Loads scooters for the visible area whenever the map stops moving. */
+function ScooterLayer({ onState }: { onState: (s: ScooterState) => void }) {
+  const map = useMap();
+  const [feed, setFeed] = useState<ScooterFeed | null>(null);
+  useEffect(() => {
+    let ctrl: AbortController | null = null;
+    const load = () => {
+      ctrl?.abort();
+      if (map.getZoom() < SCOOTER_MIN_ZOOM) {
+        setFeed(null);
+        onState({ feed: null, tooFar: true });
+        return;
+      }
+      const b = map.getBounds();
+      ctrl = new AbortController();
+      fetch(`/api/scooters?bbox=${[b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((v) => v.toFixed(4)).join(",")}`, { signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((d: ScooterFeed) => {
+          setFeed(d);
+          onState({ feed: d, tooFar: false });
+        })
+        .catch(() => {});
+    };
+    load();
+    map.on("moveend", load);
+    const t = setInterval(load, 60_000);
+    return () => {
+      ctrl?.abort();
+      map.off("moveend", load);
+      clearInterval(t);
+      onState({ feed: null, tooFar: false });
+    };
+  }, [map, onState]);
+  return (
+    <>
+      {feed?.vehicles.map((v) => (
+        <CircleMarker
+          key={v.id}
+          center={v.pos}
+          radius={5}
+          pathOptions={{ color: "#0c0e12", weight: 1.5, fillColor: v.battery !== null && v.battery < 25 ? "#9d5c7f" : "#f472b6", fillOpacity: 0.95 }}
+        >
+          <Tooltip className="ep-tooltip">
+            <b>{feed.source === "demo" ? "DEMO paspirtukas" : `Paspirtukas${feed.operator ? ` · ${feed.operator}` : ""}`}</b>
+            {v.battery !== null && <div className="text-xs">Baterija {v.battery} %</div>}
+          </Tooltip>
+        </CircleMarker>
+      ))}
+    </>
+  );
+}
+
 /** Geometry of the "simple" modes that are one line on the map. */
 const LINE_MODES = ["car", "scooter", "bike", "walk"] as const;
 
@@ -115,6 +171,7 @@ export default function MapView({
   const zones = useJson<{ zones: Zone[] }>("/data/parking.json", layers.parking);
   const border = useJson<{ rings: LatLng[][] }>("/data/lithuania.json", true);
   const [stations, setStations] = useState<Station[] | null>(null);
+  const [scooterState, setScooterState] = useState<ScooterState>({ feed: null, tooFar: false });
   useEffect(() => {
     if (!layers.bikeshare) return;
     let alive = true;
@@ -164,7 +221,7 @@ export default function MapView({
   const rides = plan?.transit?.legs.filter((l): l is RideLeg => l.kind === "ride") ?? [];
 
   return (
-    <div className={`h-full w-full ${picking ? "ep-picking" : ""}`}>
+    <div className={`relative h-full w-full ${picking ? "ep-picking" : ""}`}>
       <MapContainer
         center={[55.17, 23.9]}
         zoom={7}
@@ -266,6 +323,8 @@ export default function MapView({
             </CircleMarker>
           ))}
 
+        {layers.scooters && <ScooterLayer onState={setScooterState} />}
+
         {/* Unselected routes first, faint. */}
         {plan &&
           LINE_MODES.map((m) => {
@@ -287,6 +346,19 @@ export default function MapView({
               <Polyline positions={plan[m]!.geometry} pathOptions={{ color: MODE_META[m].color, weight: 5, opacity: 1, dashArray: m === "walk" ? "2 9" : undefined }} />
             </Fragment>
           ))}
+        {plan?.scooter?.vehicle && selected === "scooter" && (
+          <>
+            <Polyline positions={[plan.from, plan.scooter.vehicle.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Marker position={plan.scooter.vehicle.pos} icon={stopIcon(MODE_META.scooter.color)}>
+              <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+                <b>{plan.scooter.source === "demo" ? "DEMO paspirtukas" : "Artimiausias paspirtukas"}</b>
+                <div className="text-xs opacity-80">
+                  {Math.round(plan.scooter.vehicle.walk)} m pėsčiomis{plan.scooter.vehicle.battery !== null ? ` · baterija ${plan.scooter.vehicle.battery} %` : ""}
+                </div>
+              </Tooltip>
+            </Marker>
+          </>
+        )}
         {plan?.bikeshare && selected === "bikeshare" && (
           <>
             <Polyline positions={[plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
@@ -345,6 +417,24 @@ export default function MapView({
           />
         )}
       </MapContainer>
+      {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
+        <div
+          className="pointer-events-none absolute left-1/2 z-[500] -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--bg)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
+          style={{ bottom: padding.bottom + 12 }}
+        >
+          {scooterState.tooFar ? (
+            "Priartinkite, kad matytumėte paspirtukus"
+          ) : scooterState.feed?.source === "demo" ? (
+            <span>
+              <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b> {scooterState.feed.total} išgalvotų paspirtukų – ne tikri duomenys
+            </span>
+          ) : scooterState.feed?.source === "none" ? (
+            "Paspirtukų duomenų šaltinis neprijungtas"
+          ) : (
+            `${scooterState.feed?.total} paspirtukai${scooterState.feed?.operator ? ` · ${scooterState.feed.operator}` : ""}`
+          )}
+        </div>
+      )}
     </div>
   );
 }

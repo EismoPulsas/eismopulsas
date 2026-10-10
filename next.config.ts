@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/plan": ["./data/transit.json.gz", "./public/data/bus-lanes.json", "./public/data/parking.json"],
     "/api/geocode": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
+    "/api/scooters": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
   },
 };
 

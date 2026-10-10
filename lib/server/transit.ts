@@ -476,3 +476,12 @@ export function searchStops(q: string, near: LatLng | null, limit: number): { na
   out.sort((a, b) => Number(b.exact) - Number(a.exact) || a.d - b.d);
   return out.slice(0, limit).map(({ name, pos }) => ({ name, pos }));
 }
+
+/** Positions of stops within `radius` m of `c` – handy street-side points. */
+export function stopsWithin(c: LatLng, radius: number): LatLng[] {
+  const N = load();
+  return N.grid
+    .near(c, radius)
+    .map((s) => stopPos(N, s))
+    .filter((p) => haversine(c, p) <= radius);
+}

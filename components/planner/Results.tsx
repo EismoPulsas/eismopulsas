@@ -95,6 +95,9 @@ function ModeCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="font-display text-[15px] font-semibold">{meta.short}</span>
+            {m.id === "scooter" && plan.scooter?.source === "demo" && (
+              <span className="rounded bg-[#f472b6] px-1 text-[10px] font-bold text-black">DEMO</span>
+            )}
             {isBest && (
               <span className="rounded-md bg-[var(--sign-green)] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase ring-1 ring-white/80">
                 Geriausia
@@ -133,16 +136,7 @@ function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
       {m.id === "car" && plan.car && <CarDetails plan={plan} />}
       {m.id === "transit" && plan.transit && <TransitTimeline t={plan.transit} />}
       {m.id === "bikeshare" && plan.bikeshare && <BikeshareDetails plan={plan} kcal={m.kcal} />}
-      {m.id === "scooter" && plan.scooter && (
-        <div className="flex flex-col gap-1.5">
-          <Row label="Rasti ir atrakinti paspirtuką" value="≈ 3 min" />
-          <Row label={`Važiuoti ${fmtKm(plan.scooter.distance)}`} value={fmtDur(plan.scooter.rideDuration)} />
-          <Row label="Pastatyti" value="≈ 1 min" />
-          <p className="mt-1 rounded-lg bg-[var(--chip)] p-2 text-xs text-[var(--muted)]">
-            Vertinimas: Bolt ir kiti operatoriai Lietuvoje neskelbia atvirų (GBFS) duomenų, todėl nežinome, kur stovi artimiausias paspirtukas. Kainą galite pasikeisti nustatymuose.
-          </p>
-        </div>
-      )}
+      {m.id === "scooter" && plan.scooter && <ScooterDetails plan={plan} />}
       {(m.id === "bike" || m.id === "walk") && (
         <div className="flex flex-col gap-1.5">
           <Row label="Atstumas" value={fmtKm(m.distance)} />
@@ -169,6 +163,36 @@ function Details({ plan, mode: m }: { plan: PlanResponse; mode: ModeSummary }) {
       )}
       {m.id === "transit" && m.kcal > 5 && (
         <div className="text-xs text-[var(--muted)]">Bonusas: pėsčiomis sudeginsite ≈ {fmtNum(m.kcal)} kcal.</div>
+      )}
+    </div>
+  );
+}
+
+function ScooterDetails({ plan }: { plan: PlanResponse }) {
+  const sc = plan.scooter!;
+  const v = sc.vehicle;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {v ? (
+        <Row
+          label={<span className="flex items-center gap-1.5"><WalkIcon size={15} /> Iki artimiausio paspirtuko{v.battery !== null ? ` (baterija ${v.battery} %)` : ""}</span>}
+          value={`${fmtKm(v.walk)} · ${Math.max(1, Math.round(v.walk / 1.25 / 60))} min`}
+        />
+      ) : (
+        <Row label="Rasti ir atrakinti paspirtuką" value="≈ 3 min" />
+      )}
+      <Row label={`Važiuoti ${fmtKm(sc.distance)}`} value={fmtDur(sc.rideDuration)} />
+      <Row label="Pastatyti" value="≈ 1 min" />
+      {sc.source === "demo" && (
+        <p className="mt-1 rounded-lg border border-[#f472b6]/50 bg-[#f472b6]/10 p-2 text-xs">
+          <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b>
+          Paspirtuko vieta išgalvota – tai bandomieji duomenys, kol negauta prieiga prie tikro operatoriaus srauto.
+        </p>
+      )}
+      {sc.source === "estimate" && (
+        <p className="mt-1 rounded-lg bg-[var(--chip)] p-2 text-xs text-[var(--muted)]">
+          Vertinimas: Bolt ir kiti operatoriai Lietuvoje neskelbia atvirų (GBFS) duomenų, todėl nežinome, kur stovi artimiausias paspirtukas. Kainą galite pasikeisti nustatymuose.
+        </p>
       )}
     </div>
   );

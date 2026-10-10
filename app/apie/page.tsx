@@ -100,8 +100,9 @@ export default function About() {
               laisva vieta ir ėjimas iki tikslo. Duomenys – oficialus Cyclocity GBFS srautas. Sistema veikia balandžio–spalio mėn.
             </li>
             <li>
-              <b>Paspirtukas:</b> vertinimas – ≈ 3 min. rasti ir atrakinti, ≈ 17 km/h važiuojant, 1 min. pastatyti. Bolt ir kiti operatoriai Lietuvoje
-              neskelbia atvirų GBFS duomenų (Bolt viešai juos teikia tik keliems miestams užsienyje), todėl tikslios paspirtuko vietos nežinome.
+              <b>Paspirtukas:</b> ėjimas iki artimiausio laisvo paspirtuko, ≈ 17 km/h važiuojant, 1 min. pastatyti. Bolt ir kiti operatoriai Lietuvoje
+              neskelbia atvirų GBFS duomenų (Bolt viešai juos teikia tik keliems miestams užsienyje). Kol negauta prieiga, bandomojoje versijoje
+              rodomi aiškiai pažymėti <b>DEMO</b> paspirtukai, o tikrojoje – vertinimas (≈ 3 min. rasti paspirtuką).
             </li>
             <li>
               <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
@@ -185,6 +186,7 @@ export default function About() {
             {`GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876&depart=2026-10-12T08:00
 GET /api/traffic          # gyvi Via Lietuva jutikliai
 GET /api/bikeshare        # Cyclocity stotelės realiu laiku
+GET /api/scooters?bbox=…  # paspirtukai (GBFS arba DEMO)
 GET /api/geocode?q=Gedimino pr. 9, Vilnius`}
           </pre>
         </section>

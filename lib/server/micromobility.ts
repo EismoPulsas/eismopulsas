@@ -2,6 +2,7 @@ import "server-only";
 import { haversine, type LatLng } from "../geo";
 import type { BikeshareResult, ScooterResult } from "../plan-types";
 import { osrmRoute, type OsrmRoute } from "./osrm";
+import { nearestScooter, type Fleet } from "./scooters";
 
 // Shared bikes and e-scooters.
 //
@@ -139,17 +140,27 @@ const SCOOTER_TOWNS: { name: string; c: LatLng; r: number }[] = [
   { name: "Druskininkai", c: [54.0167, 23.9667], r: 4000 },
 ];
 
-export function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null): ScooterResult | null {
+export function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet): ScooterResult | null {
   if (!bike) return null;
+  const rideDuration = Math.round(bike.distance / SCOOTER_SPEED);
+  const base = { distance: Math.round(bike.distance), rideDuration, geometry: bike.coords, operator: fleet.operator };
+
+  if (fleet.source !== "none") {
+    // Known fleet: walk to the nearest free scooter, unlock (30 s), ride, park (1 min).
+    const v = nearestScooter(fleet, from);
+    if (!v) return null;
+    const walk = Math.round(v.distance * 1.3);
+    return {
+      ...base,
+      city: null,
+      source: fleet.source,
+      vehicle: { id: v.id, pos: v.pos, battery: v.battery, walk },
+      duration: Math.round(walk / 1.25) + 30 + rideDuration + 60,
+    };
+  }
+
   const town = SCOOTER_TOWNS.find((t) => haversine(from, t.c) <= t.r && haversine(to, t.c) <= t.r);
   if (!town) return null;
-  const rideDuration = Math.round(bike.distance / SCOOTER_SPEED);
-  return {
-    city: town.name,
-    distance: Math.round(bike.distance),
-    rideDuration,
-    // ≈ 3 min to walk to the nearest scooter and unlock it, 1 min to park.
-    duration: 180 + rideDuration + 60,
-    geometry: bike.coords,
-  };
+  // ≈ 3 min to walk to the nearest scooter and unlock it, 1 min to park.
+  return { ...base, city: town.name, source: "estimate", vehicle: null, duration: 180 + rideDuration + 60 };
 }

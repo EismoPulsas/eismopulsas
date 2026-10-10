@@ -68,8 +68,21 @@ export type BikeshareResult = {
   updated: string | null;
 };
 
-/** Shared e-scooter: an estimate, no operator publishes open data in Lithuania. */
-export type ScooterResult = { city: string; distance: number; rideDuration: number; duration: number; geometry: LatLng[] };
+/**
+ * Shared e-scooter. With a fleet feed (real GBFS or demo) we walk to the nearest
+ * scooter; otherwise it is an estimate with a typical walk to one.
+ */
+export type ScooterResult = {
+  city: string | null;
+  source: "gbfs" | "demo" | "estimate";
+  operator: string | null;
+  /** The scooter we would take, if the fleet is known. */
+  vehicle: { id: string; pos: LatLng; battery: number | null; walk: number } | null;
+  distance: number;
+  rideDuration: number;
+  duration: number;
+  geometry: LatLng[];
+};
 
 export type WalkLeg = {
   kind: "walk";
