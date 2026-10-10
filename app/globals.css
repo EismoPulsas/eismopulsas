@@ -212,7 +212,8 @@ body {
 
 /* ---------------------------------------------------------- leaflet */
 .leaflet-container.leaflet-container {
-  background: #0e1015;
+  /* Same as the OpenFreeMap dark style's background, so the map never flashes while loading. */
+  background: #0c0c0c;
   font-family: var(--font-sans);
 }
 .ep-picking .leaflet-container {
