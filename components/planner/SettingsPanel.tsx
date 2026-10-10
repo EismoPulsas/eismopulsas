@@ -32,7 +32,7 @@ function NumberField({
       <div className="relative">
         <input
           type="number"
-          className="field tnum pr-14"
+          className="field tnum pr-14 text-base lg:text-sm"
           value={value}
           step={step}
           min={min}
@@ -96,6 +96,15 @@ export function SettingsPanel({ s, onChange }: { s: Settings; onChange: (s: Sett
             </button>
           ))}
         </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-semibold tracking-wide text-[#f472b6] uppercase">Paspirtukas (Bolt ir kt.)</legend>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Atrakinimas" value={s.scooterUnlock} unit="€" step={0.05} min={0} max={5} onChange={(v) => set("scooterUnlock", v)} />
+          <NumberField label="Minutė" value={s.scooterPerMin} unit="€/min" step={0.01} min={0} max={2} onChange={(v) => set("scooterPerMin", v)} />
+        </div>
+        <p className="text-[11px] text-[var(--muted)]">Operatoriai Lietuvoje kainų atvirai neskelbia – įrašykite tas, kurias matote programėlėje.</p>
       </fieldset>
 
       <fieldset className="flex flex-col gap-2">

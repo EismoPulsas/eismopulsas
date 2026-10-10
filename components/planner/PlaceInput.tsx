@@ -2,20 +2,17 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { LatLng } from "@/lib/geo";
-import { LocateIcon, PinIcon } from "./icons";
+import { BusIcon, LocateIcon, PinIcon } from "./icons";
 
 export type Place = { pos: LatLng; label: string };
 
-type Hit = { lat: number; lng: number; label: string };
+type Hit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop" };
+type Status = "idle" | "loading" | "done" | "error";
 
-/** "Gedimino pr. 9, Senamiestis, Vilnius, …, Lietuva" -> "Gedimino pr. 9, Vilnius" */
-export function shortLabel(label: string): string {
-  const parts = label.split(",").map((s) => s.trim()).filter((s) => s && s !== "Lietuva" && !/^\d{5}$|^LT-?\d+/.test(s));
-  if (parts.length <= 2) return parts.join(", ");
-  // Keep the first part (name / street), plus the house number if split, plus the town.
-  const head = /^\d+[a-zA-Z]?$/.test(parts[0]) ? `${parts[1]} ${parts[0]}` : parts[0];
-  const town = parts.find((p, i) => i > 0 && /(Vilnius|Kaunas|Klaipėda|Šiauliai|Panevėžys|Alytus|miestas|mstl\.|kaimas|k\.)$/.test(p)) ?? parts.at(-3) ?? parts[1];
-  return head === town ? head : `${head}, ${town}`;
+/** "Vilniaus universitetas" + "Saulėtekio al. 9, Vilnius" -> "Vilniaus universitetas, Vilnius" */
+export function placeLabel(label: string, sub: string | null | undefined): string {
+  const town = sub?.split(",").pop()?.trim();
+  return town && town !== label && !label.includes(town) ? `${label}, ${town}` : label;
 }
 
 export function PlaceInput({
@@ -24,6 +21,7 @@ export function PlaceInput({
   value,
   placeholder,
   active,
+  near,
   onChange,
   onPickOnMap,
   onLocate,
@@ -33,53 +31,67 @@ export function PlaceInput({
   value: Place | null;
   placeholder: string;
   active: boolean;
+  /** Results near this point rank first (usually the other end of the trip). */
+  near: LatLng | null;
   onChange: (p: Place | null) => void;
   onPickOnMap: () => void;
   onLocate?: () => void;
 }) {
   const [text, setText] = useState(value?.label ?? "");
   const [hits, setHits] = useState<Hit[]>([]);
+  const [status, setStatus] = useState<Status>("idle");
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState(-1);
+  const [query, setQuery] = useState<string | null>(null);
   const listId = useId();
-  const typed = useRef(false);
+  const nearRef = useRef(near);
+  useEffect(() => {
+    nearRef.current = near;
+  }, [near]);
 
-  // Follow outside changes (map click, drag, swap).
+  // Follow outside changes (map click, drag, swap, examples).
   const [shown, setShown] = useState(value);
   if (shown !== value) {
     setShown(value);
     setText(value?.label ?? "");
+    setQuery(null);
+    setOpen(false);
   }
 
+  // `query` is only set by typing, so programmatic text changes never search.
   useEffect(() => {
-    if (!typed.current) return;
-    const q = text.trim();
-    if (q.length < 3) return;
+    if (query === null || query.trim().length < 2) return;
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      setBusy(true);
-      fetch(`/api/geocode?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
-        .then((r) => r.json())
-        .then((d: Hit[]) => {
-          setHits(Array.isArray(d) ? d : []);
-          setOpen(true);
-          setCursor(-1);
+      setStatus("loading");
+      setOpen(true);
+      const n = nearRef.current;
+      const url = `/api/geocode?q=${encodeURIComponent(query.trim())}${n ? `&near=${n[0].toFixed(3)},${n[1].toFixed(3)}` : ""}`;
+      fetch(url, { signal: ctrl.signal })
+        .then(async (r) => {
+          const d = await r.json();
+          if (!r.ok || !Array.isArray(d)) throw new Error(d?.error ?? "error");
+          setHits(d);
+          setCursor(d.length ? 0 : -1);
+          setStatus("done");
         })
-        .catch(() => {})
-        .finally(() => setBusy(false));
-    }, 400);
+        .catch((e) => {
+          if (e.name !== "AbortError") setStatus("error");
+        });
+    }, 280);
     return () => {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [text]);
+  }, [query]);
 
   const choose = (h: Hit) => {
-    typed.current = false;
     setOpen(false);
-    onChange({ pos: [h.lat, h.lng], label: shortLabel(h.label) });
+    setQuery(null);
+    onChange({ pos: [h.lat, h.lng], label: h.kind === "stop" ? `${h.label} (stotelė)` : placeLabel(h.label, h.sub) });
   };
+
+  const showList = open && query !== null && query.trim().length >= 2;
 
   return (
     <div className="relative flex items-center gap-2">
@@ -92,70 +104,86 @@ export function PlaceInput({
       </span>
       <div className="relative min-w-0 flex-1">
         <input
-          className="field pr-16"
+          className="field pr-[4.5rem] text-base lg:text-sm"
           style={active ? { borderColor: "var(--marking)" } : undefined}
           value={text}
           placeholder={placeholder}
           aria-label={placeholder}
           role="combobox"
-          aria-expanded={open && hits.length > 0}
+          aria-expanded={showList}
           aria-controls={listId}
+          aria-autocomplete="list"
           autoComplete="off"
+          enterKeyHint="search"
           onChange={(e) => {
-            typed.current = true;
-            if (e.target.value.trim().length < 3) setHits([]);
             setText(e.target.value);
+            setQuery(e.target.value);
+            if (e.target.value.trim().length < 2) {
+              setHits([]);
+              setStatus("idle");
+            }
             if (!e.target.value) onChange(null);
           }}
           onFocus={(e) => {
             e.target.select();
-            if (hits.length) setOpen(true);
+            if (hits.length && query !== null) setOpen(true);
           }}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onBlur={() => setTimeout(() => setOpen(false), 180)}
           onKeyDown={(e) => {
-            if (!open || !hits.length) return;
             if (e.key === "ArrowDown") {
               e.preventDefault();
+              setOpen(true);
               setCursor((c) => Math.min(hits.length - 1, c + 1));
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
               setCursor((c) => Math.max(0, c - 1));
             } else if (e.key === "Enter") {
               e.preventDefault();
-              choose(hits[Math.max(0, cursor)]);
+              if (hits.length) choose(hits[Math.max(0, cursor)]);
             } else if (e.key === "Escape") setOpen(false);
           }}
         />
-        <div className="absolute inset-y-0 right-1.5 flex items-center gap-0.5">
-          {busy && <span className="mr-1 h-3 w-3 animate-spin rounded-full border-2 border-[var(--muted)] border-t-transparent" />}
+        <div className="absolute inset-y-0 right-1 flex items-center">
           {onLocate && (
-            <button type="button" onClick={onLocate} className="rounded-md p-1.5 text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--ink)]" title="Mano vieta" aria-label="Naudoti mano vietą">
-              <LocateIcon size={16} />
+            <button type="button" onClick={onLocate} className="grid h-9 w-9 place-items-center rounded-md text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--ink)]" title="Mano vieta" aria-label="Naudoti mano vietą">
+              <LocateIcon size={17} />
             </button>
           )}
           <button
             type="button"
             onClick={onPickOnMap}
-            className={`rounded-md p-1.5 hover:bg-[var(--line)] hover:text-[var(--ink)] ${active ? "text-[var(--marking)]" : "text-[var(--muted)]"}`}
+            className={`grid h-9 w-9 place-items-center rounded-md hover:bg-[var(--line)] hover:text-[var(--ink)] ${active ? "text-[var(--marking)]" : "text-[var(--muted)]"}`}
             title="Pažymėti žemėlapyje"
             aria-label="Pažymėti žemėlapyje"
             aria-pressed={active}
           >
-            <PinIcon size={16} />
+            <PinIcon size={17} />
           </button>
         </div>
-        {open && hits.length > 0 && (
-          <ul id={listId} role="listbox" className="absolute top-full right-0 left-0 z-[1000] mt-1 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] shadow-2xl">
+        {showList && (
+          <ul
+            id={listId}
+            role="listbox"
+            className="absolute top-full right-0 left-0 z-[1200] mt-1 max-h-[min(60dvh,380px)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--line)] bg-[var(--panel)] shadow-2xl"
+          >
+            {status === "loading" && !hits.length && <li className="px-3 py-3 text-sm text-[var(--muted)]">Ieškoma…</li>}
+            {status === "done" && !hits.length && <li className="px-3 py-3 text-sm text-[var(--muted)]">Nieko nerasta. Pabandykite kitaip arba pažymėkite žemėlapyje.</li>}
+            {status === "error" && <li className="px-3 py-3 text-sm text-[var(--wait)]">Paieška laikinai neveikia – pažymėkite vietą žemėlapyje.</li>}
             {hits.map((h, i) => (
               <li key={`${h.lat},${h.lng},${i}`} role="option" aria-selected={i === cursor}>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(h)}
-                  className={`block w-full px-3 py-2 text-left text-sm ${i === cursor ? "bg-[var(--chip)]" : "hover:bg-[var(--chip)]"}`}
+                  className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left ${i === cursor ? "bg-[var(--chip)]" : "hover:bg-[var(--chip)]"} ${status === "loading" ? "opacity-60" : ""}`}
                 >
-                  <div className="truncate font-medium">{shortLabel(h.label)}</div>
-                  <div className="truncate text-xs text-[var(--muted)]">{h.label}</div>
+                  <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${h.kind === "stop" ? "bg-[var(--sign-blue)] text-white" : "bg-[var(--chip)] text-[var(--muted)]"}`}>
+                    {h.kind === "stop" ? <BusIcon size={15} /> : <PinIcon size={15} />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">{h.label}</span>
+                    {h.sub && <span className="block truncate text-xs text-[var(--muted)]">{h.sub}</span>}
+                  </span>
                 </button>
               </li>
             ))}

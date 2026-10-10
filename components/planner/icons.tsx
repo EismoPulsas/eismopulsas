@@ -43,6 +43,22 @@ export const BikeIcon = ({ size = 20, className }: P) =>
     <path d="M6 16 9.5 9h6l2.5 7M9.5 9 12 16h-6M14 6.5h2.5l-1 2.5" />
   </>);
 
+export const ScooterIcon = ({ size = 20, className }: P) =>
+  svg(size, className, <>
+    <circle cx="5.5" cy="18" r="2.5" />
+    <circle cx="18.5" cy="18" r="2.5" />
+    <path d="M8 18h8M16.5 18 13.5 5H16M13.5 5h-2" />
+  </>);
+
+/** Bicycle with a dock bar: station-based shared bike. */
+export const BikeshareIcon = ({ size = 20, className }: P) =>
+  svg(size, className, <>
+    <circle cx="6" cy="15" r="3.3" />
+    <circle cx="18" cy="15" r="3.3" />
+    <path d="M6 15 9.3 8.5h5.4L18 15M9.3 8.5 11.8 15H6M13.6 6h2.2" />
+    <path d="M3 21h18" />
+  </>);
+
 export const WalkIcon = ({ size = 20, className }: P) =>
   svg(size, className, <>
     <circle cx="13" cy="4" r="1.8" />
@@ -113,9 +129,9 @@ export const FlameIcon = ({ size = 16, className }: P) =>
 
 /** Mode glyph on a road-sign-like plate. */
 export function ModeBadge({ mode, size = 40 }: { mode: ModeId; size?: number }) {
-  const Icon = { car: CarIcon, transit: BusIcon, bike: BikeIcon, walk: WalkIcon }[mode];
-  // Car keeps a red-rimmed "prohibition" look; the rest are blue mandatory signs.
-  const round = mode === "bike" || mode === "walk" || mode === "car";
+  const Icon = { car: CarIcon, transit: BusIcon, bikeshare: BikeshareIcon, scooter: ScooterIcon, bike: BikeIcon, walk: WalkIcon }[mode];
+  // Car keeps a red-rimmed "prohibition" look; the rest are blue mandatory / information signs.
+  const round = mode === "bike" || mode === "walk" || mode === "car" || mode === "scooter";
   return (
     <span
       className="grid shrink-0 place-items-center text-white"

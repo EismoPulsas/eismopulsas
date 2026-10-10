@@ -28,6 +28,19 @@ type RawStatus = {
   is_returning: boolean;
 };
 
+// "K. SIRVYDO SKVERAS" -> "K. Sirvydo skveras": capitalise names, keep common nouns lower-case.
+const COMMON = new Set(
+  "skveras aikštė gatvė stotis parkas turgus turgavietė tiltas ir biblioteka gimnazija teatras stadionas universitetas centras žiedas rūmai kalnas miestas miestelis vartai".split(" "),
+);
+const tidy = (s: string) =>
+  s !== s.toUpperCase()
+    ? s
+    : s
+        .toLowerCase()
+        .split(" ")
+        .map((w, i) => (i > 0 && COMMON.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+        .join(" ");
+
 let info: { at: number; stations: RawInfo[] } | null = null;
 let cache: { at: number; stations: BikeStation[] } | null = null;
 let inflight: Promise<BikeStation[]> | null = null;
@@ -48,7 +61,7 @@ export async function bikeStations(): Promise<BikeStation[]> {
       const status = new Map((await get<{ stations: RawStatus[] }>("station_status")).stations.map((s) => [s.station_id, s]));
       const stations = info.stations.map((s): BikeStation => {
         const st = status.get(s.station_id);
-        const name = s.name.find((n) => n.language === "lt")?.text ?? s.name[0]?.text ?? s.station_id;
+        const name = tidy(s.name.find((n) => n.language === "lt")?.text ?? s.name[0]?.text ?? s.station_id);
         return {
           id: s.station_id,
           name,

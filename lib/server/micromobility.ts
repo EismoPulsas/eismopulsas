@@ -1,0 +1,118 @@
+import "server-only";
+import { haversine, type LatLng } from "../geo";
+import type { BikeshareResult, ScooterResult } from "../plan-types";
+import { bikeStations, type BikeStation } from "./bikeshare";
+import { osrmRoute, type OsrmRoute } from "./osrm";
+import { nearestScooter, type Fleet } from "./scooters";
+
+// Shared bikes and e-scooters.
+//
+// Cyclocity Vilnius (JCDecaux) publishes an official, live GBFS feed: stations,
+// bikes and free docks. Bolt and other scooter operators publish no open feed
+// for Lithuania (Bolt's public GBFS covers only a handful of cities abroad), so
+// scooters are an estimate: typical speed, time to find one, typical price.
+
+const WALK = 1.25 / 1.3; // m/s along streets ≈ straight line / 1.3
+const RIDE_SPEED = 16 / 3.6;
+const SCOOTER_SPEED = 17 / 3.6; // 25 km/h cap, crossings and pavements in between
+const MAX_WALK = 900;
+
+/** The system runs April–October (system_information.opening_hours). */
+const inSeason = (date: string) => {
+  const m = +date.slice(5, 7);
+  return m >= 4 && m <= 10;
+};
+
+export async function planBikeshare(
+  from: LatLng,
+  to: LatLng,
+  date: string,
+  isNow: boolean,
+): Promise<{ result: BikeshareResult | null; note: string | null }> {
+  let stations: BikeStation[];
+  try {
+    stations = await bikeStations();
+  } catch (err) {
+    console.error("Cyclocity GBFS unavailable:", err);
+    return { result: null, note: null };
+  }
+  if (!stations.length) return { result: null, note: null };
+  const near = (p: LatLng, ok: (s: BikeStation) => boolean) =>
+    stations
+      .filter((s) => s.open && ok(s))
+      .map((s) => ({ s, d: haversine(p, s.pos) }))
+      .filter((x) => x.d <= MAX_WALK)
+      .sort((a, b) => a.d - b.d)[0];
+  // Nothing near either end: the trip is simply outside the system's area.
+  const anyA = near(from, () => true);
+  const anyB = near(to, () => true);
+  if (!anyA || !anyB) return { result: null, note: null };
+  if (!inSeason(date)) return { result: null, note: "Cyclocity dviračiai veikia balandžio–spalio mėn." };
+
+  // Live counts only matter when leaving now; for later trips any station will do.
+  const a = isNow ? near(from, (s) => s.bikes > 0) : anyA;
+  const b = isNow ? near(to, (s) => s.docks > 0) : anyB;
+  if (!a || !b) return { result: null, note: !a ? "Šalia A dabar nėra laisvų Cyclocity dviračių." : "Šalia B dabar nėra laisvų Cyclocity vietų." };
+  if (a.s.id === b.s.id) return { result: null, note: null };
+
+  const ride = await osrmRoute("bike", a.s.pos, b.s.pos);
+  if (!ride) return { result: null, note: null };
+  const walkTo = Math.round(a.d * 1.3);
+  const walkFrom = Math.round(b.d * 1.3);
+  const rideTime = Math.max(ride.duration, ride.distance / RIDE_SPEED);
+  return {
+    result: {
+      system: "Cyclocity Vilnius",
+      from: { name: a.s.name, pos: a.s.pos, bikes: a.s.bikes },
+      to: { name: b.s.name, pos: b.s.pos, docks: b.s.docks },
+      walkTo,
+      walkFrom,
+      ride: Math.round(ride.distance),
+      rideDuration: Math.round(rideTime),
+      // Walk, take a bike (1 min), ride, dock it (1 min), walk.
+      duration: Math.round(a.d / WALK + 60 + rideTime + 60 + b.d / WALK),
+      geometry: ride.coords,
+      live: isNow,
+      updated: null,
+    },
+    note: null,
+  };
+}
+
+// Towns where shared e-scooters (Bolt and others) operate, roughly.
+const SCOOTER_TOWNS: { name: string; c: LatLng; r: number }[] = [
+  { name: "Vilnius", c: [54.6872, 25.2797], r: 12000 },
+  { name: "Kaunas", c: [54.8985, 23.9036], r: 10000 },
+  { name: "Klaipėda", c: [55.7033, 21.1443], r: 9000 },
+  { name: "Šiauliai", c: [55.9349, 23.3137], r: 6000 },
+  { name: "Panevėžys", c: [55.7348, 24.3575], r: 6000 },
+  { name: "Palanga", c: [55.9175, 21.0686], r: 5000 },
+  { name: "Alytus", c: [54.3963, 24.0459], r: 5000 },
+  { name: "Marijampolė", c: [54.5593, 23.354], r: 4000 },
+  { name: "Druskininkai", c: [54.0167, 23.9667], r: 4000 },
+];
+
+export function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet): ScooterResult | null {
+  if (!bike) return null;
+  const rideDuration = Math.round(bike.distance / SCOOTER_SPEED);
+  const base = { distance: Math.round(bike.distance), rideDuration, geometry: bike.coords, operator: fleet.operator };
+
+  if (fleet.source !== "none") {
+    // Known fleet: walk to the nearest free scooter, unlock (30 s), ride, park (1 min).
+    const v = nearestScooter(fleet, from);
+    if (!v) return null;
+    const walk = Math.round(v.distance * 1.3);
+    return {
+      ...base,
+      city: null,
+      source: fleet.source,
+      vehicle: { id: v.id, pos: v.pos, battery: v.battery, walk },
+      duration: Math.round(walk / 1.25) + 30 + rideDuration + 60,
+    };
+  }
+
+  const town = SCOOTER_TOWNS.find((t) => haversine(from, t.c) <= t.r && haversine(to, t.c) <= t.r);
+  if (!town) return null;
+  // ≈ 3 min to walk to the nearest scooter and unlock it, 1 min to park.
+  return { ...base, city: town.name, source: "estimate", vehicle: null, duration: 180 + rideDuration + 60 };
+}

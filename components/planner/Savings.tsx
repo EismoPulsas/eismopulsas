@@ -1,11 +1,13 @@
 "use client";
 
 import { savingsVsCar, TREE_KG_YEAR, type ModeId, type ModeSummary, type Settings } from "@/lib/metrics";
-import { fmtCo2, fmtDur, fmtEur, fmtEur0, fmtNum, MODE_META } from "./format";
+import { fmtCo2, fmtDur, fmtEur, fmtEur0, fmtNum, MODE_TAB } from "./format";
 import { TreeIcon } from "./icons";
 
 const ALT_LABEL: Record<Exclude<ModeId, "car">, string> = {
   transit: "viešuoju transportu",
+  bikeshare: "Cyclocity dviračiu",
+  scooter: "paspirtuku",
   bike: "dviračiu",
   walk: "pėsčiomis",
 };
@@ -35,18 +37,22 @@ export function Savings({
 
   return (
     <section aria-label="Sutaupymas" className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-display text-sm font-semibold tracking-wide text-[var(--muted)] uppercase">Jei vietoj automobilio…</h2>
-        {options.length > 1 && (
-          <div className="seg text-xs">
-            {options.map((o) => (
-              <button key={o.id} type="button" aria-pressed={o.id === other.id} onClick={() => onAlt(o.id)}>
-                {MODE_META[o.id].short.split(" ")[0]}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <h2 className="font-display text-sm font-semibold tracking-wide text-[var(--muted)] uppercase">Jei vietoj automobilio…</h2>
+      {options.length > 1 && (
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              aria-pressed={o.id === other.id}
+              onClick={() => onAlt(o.id)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-sm ${o.id === other.id ? "border-white bg-[var(--ink)] font-semibold text-[var(--bg)]" : "border-[var(--line)] bg-[var(--chip)] text-[var(--muted)]"}`}
+            >
+              {MODE_TAB[o.id]}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className={`road-sign ${cheaper && s.perTrip.co2 > 0 ? "" : "blue"}`}>
         <div className="road-sign-inner">

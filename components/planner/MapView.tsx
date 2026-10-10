@@ -12,7 +12,8 @@ import type { ModeId } from "@/lib/metrics";
 import type { PlanResponse, RideLeg } from "@/lib/plan-types";
 import { fmtClock, MODE_META } from "./format";
 
-export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; bikeshare: boolean };
+export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; bikeshare: boolean; scooters: boolean };
+type Padding = { top: number; bottom: number };
 
 export type MapTheme = "dark" | "fiord" | "positron" | "liberty";
 export const MAP_THEMES: { id: MapTheme; label: string; bg: string; light: boolean }[] = [
@@ -24,6 +25,8 @@ export const MAP_THEMES: { id: MapTheme; label: string; bg: string; light: boole
 
 type Lane = { k: "A" | "A+" | "OSM"; n: string; c: LatLng[] };
 type Zone = { city: string; zone: string; price: number; text: string; poly: LatLng[][][] };
+type ScooterFeed = { source: "gbfs" | "demo" | "none"; operator: string | null; total: number; vehicles: { id: string; pos: LatLng; battery: number | null }[] };
+type ScooterState = { feed: ScooterFeed | null; tooFar: boolean };
 type Sensor = { name: string; road: string; pos: LatLng; speed: number; limit: number; vehicles: number };
 type BikeStation = { id: string; name: string; address: string; pos: LatLng; capacity: number; bikes: number; docks: number; open: boolean };
 
@@ -137,17 +140,75 @@ const WORLD: LatLng[] = [
   [62, 10],
 ];
 
-/** Re-frame the map when the trip changes. */
-function Framer({ points, nonce }: { points: LatLng[]; nonce: string }) {
+/** Re-frame the map when the trip changes, leaving room for whatever covers it (search card, sheet). */
+function Framer({ points, nonce, padding }: { points: LatLng[]; nonce: string; padding: Padding }) {
   const map = useMap();
   useEffect(() => {
     if (!points.length) return;
-    if (points.length === 1) map.flyTo(points[0], Math.max(map.getZoom(), 13), { duration: 0.6 });
-    else map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], maxZoom: 15, duration: 0.6 });
+    const pad = { paddingTopLeft: L.point(32, padding.top + 24), paddingBottomRight: L.point(32, padding.bottom + 24) };
+    if (points.length === 1) map.flyToBounds(L.latLngBounds(points[0], points[0]).pad(0.01), { ...pad, maxZoom: 14, duration: 0.6 });
+    else map.flyToBounds(L.latLngBounds(points), { ...pad, maxZoom: 15, duration: 0.6 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, map]);
+  }, [nonce, map, padding.top, padding.bottom]);
   return null;
 }
+
+const SCOOTER_MIN_ZOOM = 12;
+
+/** Loads scooters for the visible area whenever the map stops moving. */
+function ScooterLayer({ onState }: { onState: (s: ScooterState) => void }) {
+  const map = useMap();
+  const [feed, setFeed] = useState<ScooterFeed | null>(null);
+  useEffect(() => {
+    let ctrl: AbortController | null = null;
+    const load = () => {
+      ctrl?.abort();
+      if (map.getZoom() < SCOOTER_MIN_ZOOM) {
+        setFeed(null);
+        onState({ feed: null, tooFar: true });
+        return;
+      }
+      const b = map.getBounds();
+      ctrl = new AbortController();
+      fetch(`/api/scooters?bbox=${[b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((v) => v.toFixed(4)).join(",")}`, { signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((d: ScooterFeed) => {
+          setFeed(d);
+          onState({ feed: d, tooFar: false });
+        })
+        .catch(() => {});
+    };
+    load();
+    map.on("moveend", load);
+    const t = setInterval(load, 60_000);
+    return () => {
+      ctrl?.abort();
+      map.off("moveend", load);
+      clearInterval(t);
+      onState({ feed: null, tooFar: false });
+    };
+  }, [map, onState]);
+  return (
+    <>
+      {feed?.vehicles.map((v) => (
+        <CircleMarker
+          key={v.id}
+          center={v.pos}
+          radius={5}
+          pathOptions={{ color: "#0c0e12", weight: 1.5, fillColor: v.battery !== null && v.battery < 25 ? "#9d5c7f" : "#f472b6", fillOpacity: 0.95 }}
+        >
+          <Tooltip className="ep-tooltip">
+            <b>{feed.source === "demo" ? "DEMO paspirtukas" : `Paspirtukas${feed.operator ? ` · ${feed.operator}` : ""}`}</b>
+            {v.battery !== null && <div className="text-xs">Baterija {v.battery} %</div>}
+          </Tooltip>
+        </CircleMarker>
+      ))}
+    </>
+  );
+}
+
+/** Geometry of the "simple" modes that are one line on the map. */
+const LINE_MODES = ["car", "scooter", "bike", "walk"] as const;
 
 /** Poll a live endpoint while its layer is on. */
 function useLive<T>(url: string, enabled: boolean, everyMs: number): T | null {
@@ -170,14 +231,20 @@ function useLive<T>(url: string, enabled: boolean, everyMs: number): T | null {
   return data;
 }
 
+// Cyan like the Cyclocity route; amber when only a couple of bikes are left.
 function bikeColor(s: BikeStation) {
   if (!s.open || s.bikes === 0) return "#6b7280";
-  return s.bikes < 3 ? "#ffb020" : "#ffc53d";
+  return s.bikes < 3 ? "#ffb020" : "#22d3ee";
 }
 
-function ThemePicker({ theme, onChange }: { theme: MapTheme; onChange: (t: MapTheme) => void }) {
+function ThemePicker({ theme, onChange, bottom }: { theme: MapTheme; onChange: (t: MapTheme) => void; bottom: number }) {
   return (
-    <div role="radiogroup" aria-label="Žemėlapio išvaizda" className="absolute bottom-6 left-3 z-[500] flex gap-1 rounded-full border border-[var(--line)] bg-[var(--bg)]/85 p-1 backdrop-blur">
+    <div
+      role="radiogroup"
+      aria-label="Žemėlapio išvaizda"
+      className="absolute left-3 z-[500] flex gap-1 rounded-full border border-[var(--line)] bg-[var(--bg)]/85 p-1 backdrop-blur transition-[bottom]"
+      style={{ bottom }}
+    >
       {MAP_THEMES.map((t) => (
         <button
           key={t.id}
@@ -220,6 +287,7 @@ export default function MapView({
   selected,
   layers,
   picking,
+  padding,
   onPick,
   onOutside,
   onMove,
@@ -230,6 +298,7 @@ export default function MapView({
   selected: ModeId | null;
   layers: Layers;
   picking: boolean;
+  padding: Padding;
   onPick: (p: LatLng) => void;
   onOutside: () => void;
   onMove: (which: "from" | "to", p: LatLng) => void;
@@ -237,14 +306,16 @@ export default function MapView({
   const lanes = useJson<{ lanes: Lane[] }>("/data/bus-lanes.json", layers.lanes);
   const zones = useJson<{ zones: Zone[] }>("/data/parking.json", layers.parking);
   const border = useJson<{ rings: LatLng[][] }>("/data/lithuania.json", true);
+  const [scooterState, setScooterState] = useState<ScooterState>({ feed: null, tooFar: false });
   const traffic = useLive<{ time: string; sensors: Sensor[] }>("/api/traffic", layers.traffic, 5 * 60 * 1000);
   const bikeshare = useLive<{ stations: BikeStation[] }>("/api/bikeshare", layers.bikeshare, 60 * 1000);
 
   const frame = useMemo(() => {
     if (plan) {
       const pts: LatLng[] = [plan.from, plan.to];
-      const g = selected === "car" ? plan.car?.geometry : selected === "bike" ? plan.bike?.geometry : selected === "walk" ? plan.walk?.geometry : null;
-      if (g) pts.push(...g);
+      const line = LINE_MODES.find((m) => m === selected);
+      if (line) pts.push(...(plan[line]?.geometry ?? []));
+      if (selected === "bikeshare" && plan.bikeshare) pts.push(...plan.bikeshare.geometry);
       if (selected === "transit" && plan.transit) for (const l of plan.transit.legs) if (l.kind === "ride") pts.push(...l.geometry);
       return { points: pts, nonce: `${plan.from}-${plan.to}-${selected}` };
     }
@@ -264,7 +335,7 @@ export default function MapView({
   const rides = plan?.transit?.legs.filter((l): l is RideLeg => l.kind === "ride") ?? [];
 
   return (
-    <div className={`h-full w-full ${picking ? "ep-picking" : ""}`}>
+    <div className={`relative h-full w-full ${picking ? "ep-picking" : ""}`}>
       <MapContainer
         center={[55.17, 23.9]}
         zoom={7}
@@ -287,7 +358,7 @@ export default function MapView({
           </>
         )}
         <ClickHandler border={border?.rings ?? null} onPick={onPick} onOutside={onOutside} />
-        <Framer points={frame.points} nonce={frame.nonce} />
+        <Framer points={frame.points} nonce={frame.nonce} padding={padding} />
 
         {layers.parking &&
           zones?.zones.map((z, i) =>
@@ -367,24 +438,59 @@ export default function MapView({
             </CircleMarker>
           ))}
 
+        {layers.scooters && <ScooterLayer onState={setScooterState} />}
+
         {/* Unselected routes first, faint. */}
         {plan &&
-          (["car", "bike", "walk"] as const).map((m) => {
+          LINE_MODES.map((m) => {
             const r = plan[m];
             if (!r || m === selected) return null;
             return <Polyline key={m} positions={r.geometry} pathOptions={{ color: MODE_META[m].color, weight: 3, opacity: 0.3 }} />;
           })}
+        {plan?.bikeshare && selected !== "bikeshare" && (
+          <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 3, opacity: 0.3 }} />
+        )}
         {plan?.transit && selected !== "transit" &&
           rides.map((l, i) => <Polyline key={`t${i}`} positions={l.geometry} pathOptions={{ color: MODE_META.transit.color, weight: 3, opacity: 0.3 }} />)}
 
         {/* Selected route on top, with a dark casing like a road. */}
-        {plan && selected && selected !== "transit" && plan[selected] && (
+        {plan &&
+          LINE_MODES.filter((m) => m === selected && plan[m]).map((m) => (
+            <Fragment key={m}>
+              <Polyline positions={plan[m]!.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+              <Polyline positions={plan[m]!.geometry} pathOptions={{ color: MODE_META[m].color, weight: 5, opacity: 1, dashArray: m === "walk" ? "2 9" : undefined }} />
+            </Fragment>
+          ))}
+        {plan?.scooter?.vehicle && selected === "scooter" && (
           <>
-            <Polyline positions={plan[selected]!.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
-            <Polyline
-              positions={plan[selected]!.geometry}
-              pathOptions={{ color: MODE_META[selected].color, weight: 5, opacity: 1, dashArray: selected === "walk" ? "2 9" : undefined }}
-            />
+            <Polyline positions={[plan.from, plan.scooter.vehicle.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Marker position={plan.scooter.vehicle.pos} icon={stopIcon(MODE_META.scooter.color)}>
+              <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+                <b>{plan.scooter.source === "demo" ? "DEMO paspirtukas" : "Artimiausias paspirtukas"}</b>
+                <div className="text-xs opacity-80">
+                  {Math.round(plan.scooter.vehicle.walk)} m pėsčiomis{plan.scooter.vehicle.battery !== null ? ` · baterija ${plan.scooter.vehicle.battery} %` : ""}
+                </div>
+              </Tooltip>
+            </Marker>
+          </>
+        )}
+        {plan?.bikeshare && selected === "bikeshare" && (
+          <>
+            <Polyline positions={[plan.from, plan.bikeshare.from.pos]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Polyline positions={[plan.bikeshare.to.pos, plan.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
+            <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+            <Polyline positions={plan.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
+            {[
+              { s: plan.bikeshare.from, text: `Paimti dviratį · laisvų ${plan.bikeshare.from.bikes ?? "?"}` },
+              { s: plan.bikeshare.to, text: `Palikti · laisvų vietų ${plan.bikeshare.to.docks ?? "?"}` },
+            ].map(({ s, text }, k) => (
+              <Marker key={k} position={s.pos} icon={stopIcon(MODE_META.bikeshare.color)}>
+                <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+                  <b>{s.name}</b>
+                  <div className="text-xs opacity-80">{text}</div>
+                </Tooltip>
+              </Marker>
+            ))}
           </>
         )}
         {plan?.transit && selected === "transit" &&
@@ -426,7 +532,26 @@ export default function MapView({
           />
         )}
       </MapContainer>
-      <ThemePicker theme={theme} onChange={pickTheme} />
+      {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
+        <div
+          className="pointer-events-none absolute left-1/2 z-[500] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--bg)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
+          style={{ bottom: padding.bottom + (padding.bottom ? 56 : 70) }}
+        >
+          {scooterState.tooFar ? (
+            "Priartinkite – matysite paspirtukus"
+          ) : scooterState.feed?.source === "demo" ? (
+            <span>
+              <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b> {scooterState.feed.total} netikri paspirtukai<span className="hidden sm:inline"> – bandomieji duomenys</span>
+            </span>
+          ) : scooterState.feed?.source === "none" ? (
+            "Paspirtukų duomenų šaltinis neprijungtas"
+          ) : (
+            `${scooterState.feed?.total} paspirtukai${scooterState.feed?.operator ? ` · ${scooterState.feed.operator}` : ""}`
+          )}
+        </div>
+      )}
+      {/* Above the phone results sheet, or the bottom corner on desktop. */}
+      <ThemePicker theme={theme} onChange={pickTheme} bottom={padding.bottom + (padding.bottom ? 10 : 24)} />
     </div>
   );
 }

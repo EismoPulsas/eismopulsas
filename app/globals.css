@@ -71,6 +71,15 @@ body {
   background-position: 0 0, 3px 5px;
 }
 
+@media (min-width: 1024px) {
+  .asphalt-lg {
+    background-color: var(--asphalt);
+    background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), radial-gradient(rgba(0, 0, 0, 0.25) 1px, transparent 1px);
+    background-size: 7px 7px, 11px 11px;
+    background-position: 0 0, 3px 5px;
+  }
+}
+
 /* Painted "A" lane marking. */
 .lane-badge {
   display: inline-flex;
@@ -208,6 +217,25 @@ body {
   background: var(--ink);
   color: var(--bg);
   font-weight: 600;
+}
+
+/* ---------------------------------------------------------- phone layout */
+@media (max-width: 1023.98px) {
+  .sheet {
+    height: var(--sheet-h);
+    transform: translateY(var(--sheet-y));
+    background-color: var(--asphalt);
+    will-change: transform;
+  }
+  .sheet-body {
+    height: var(--sheet-body);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Keep the map attribution above the sheet. */
+  .leaflet-bottom {
+    bottom: var(--map-bottom, 0px);
+    transition: bottom 260ms;
+  }
 }
 
 /* ---------------------------------------------------------- leaflet */

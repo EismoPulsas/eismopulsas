@@ -19,11 +19,14 @@ export async function osrmRoute(profile: keyof typeof PROFILE, from: LatLng, to:
   const url =
     `${BASE}/${PROFILE[profile]}/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}` +
     `?overview=full&geometries=geojson${annotate ? "&annotations=duration" : ""}`;
-  try {
-    const res = await fetch(url, {
+  const get = () =>
+    fetch(url, {
       headers: { "User-Agent": "EismoPulsas/0.2 (https://github.com/EismoPulsas/eismopulsas)" },
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(7000),
     });
+  try {
+    // The public servers now and then drop a connection; one quick retry usually lands.
+    const res = await get().catch(() => get());
     if (!res.ok) throw new Error(`OSRM ${profile} ${res.status}`);
     const body = (await res.json()) as {
       code: string;

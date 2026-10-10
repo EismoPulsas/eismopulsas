@@ -7,7 +7,9 @@
 
 import { haversine, inLithuania, simplify, type LatLng } from "@/lib/geo";
 import type { CarResult, PlanResponse } from "@/lib/plan-types";
+import { estimateScooter, planBikeshare } from "@/lib/server/micromobility";
 import { osrmRoute } from "@/lib/server/osrm";
+import { scooterFleet } from "@/lib/server/scooters";
 import { parkingZoneAt } from "@/lib/server/parking";
 import { applyTraffic } from "@/lib/server/traffic";
 import { planTransit, resolveDay, timetableInfo } from "@/lib/server/transit";
@@ -58,11 +60,14 @@ export async function GET(req: Request) {
   const straight = haversine(from, to);
   if (straight < 50) return Response.json({ error: "Taškai A ir B per arti vienas kito" }, { status: 400 });
 
-  const [carRoute, bike, walk] = await Promise.all([
+  const [carRoute, bike, walk, share, fleet] = await Promise.all([
     osrmRoute("car", from, to, true),
     straight < 80_000 ? osrmRoute("bike", from, to) : null,
     straight < 25_000 ? osrmRoute("foot", from, to) : null,
+    straight < 20_000 ? planBikeshare(from, to, depart.date, depart.isNow) : { result: null, note: null },
+    scooterFleet(),
   ]);
+  const scooter = straight < 20_000 ? estimateScooter(from, to, bike, fleet) : null;
 
   let car: CarResult | null = null;
   if (carRoute) {
@@ -105,6 +110,9 @@ export async function GET(req: Request) {
       geometry: simplify(bike.coords, 8),
     },
     walk: walk && { distance: Math.round(walk.distance), duration: Math.round(walk.duration), geometry: simplify(walk.coords, 8) },
+    bikeshare: share.result && { ...share.result, geometry: simplify(share.result.geometry, 8) },
+    bikeshareNote: share.note,
+    scooter: scooter && { ...scooter, geometry: simplify(scooter.geometry, 8) },
     transit,
     transitNote,
     timetable: { ...timetableInfo(), shifted },
