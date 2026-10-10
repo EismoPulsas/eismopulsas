@@ -38,12 +38,6 @@ const SOURCES = [
     use: "Zonos ribos, kaina už valandą ir kada mokama – automobilio kainai.",
   },
   {
-    name: "Cyclocity Vilnius viešieji dviračiai (GBFS)",
-    who: "JCDecaux / Cyclocity",
-    url: "https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json",
-    use: "Stotelės, laisvi dviračiai ir vietos realiu laiku – viešojo dviračio maršrutui.",
-  },
-  {
     name: "Gatvių maršrutai",
     who: "OSRM (FOSSGIS) pagal OpenStreetMap",
     url: "https://routing.openstreetmap.de/",
@@ -54,6 +48,18 @@ const SOURCES = [
     who: "Photon (komoot) pagal OpenStreetMap, atsarginis – Nominatim",
     url: "https://photon.komoot.io/",
     use: "Adresai ir vietos tik Lietuvoje; VT stotelės – iš tvarkaraščių.",
+  },
+  {
+    name: "Dviračių nuomos stotelės",
+    who: "Cyclocity Vilnius (JCDecaux), GBFS",
+    url: "https://www.cyclocity.lt/",
+    use: "Stotelių vietos ir kiek jose dabar yra dviračių bei laisvų vietų (atnaujinama kas minutę) – žemėlapiui ir viešojo dviračio maršrutui.",
+  },
+  {
+    name: "Žemėlapio pagrindas",
+    who: "OpenFreeMap, OpenMapTiles pagal OpenStreetMap",
+    url: "https://openfreemap.org/",
+    use: "Vektorinis tamsus žemėlapis.",
   },
 ];
 

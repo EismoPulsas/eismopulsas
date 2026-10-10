@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { preconnect } from "react-dom";
 import { inLithuania, type LatLng } from "@/lib/geo";
 import { DEFAULT_SETTINGS, rank, summarize, type ModeId, type ModeSummary, type Settings } from "@/lib/metrics";
 import type { PlanResponse } from "@/lib/plan-types";
@@ -61,6 +62,8 @@ const parseLL = (s: string | null): LatLng | null => {
 const isPhone = () => typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches;
 
 export default function Planner() {
+  // Open the map tile connections while the map code is still loading.
+  preconnect("https://tiles.openfreemap.org", { crossOrigin: "anonymous" });
   const [from, setFrom] = useState<Place | null>(null);
   const [to, setTo] = useState<Place | null>(null);
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
@@ -420,7 +423,7 @@ export default function Planner() {
                 </div>
               )}
             </div>
-            <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © Esri, OpenStreetMap bendruomenė</p>
+            <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
           </div>
         </BottomSheet>
       </aside>
@@ -462,7 +465,7 @@ function LayerToggles({ layers, onChange, top }: { layers: Layers; onChange: (l:
     { id: "lanes", label: "A juostos", short: "A", swatch: "var(--lane)" },
     { id: "traffic", label: "Gyvas eismas", short: "Eismas", swatch: "var(--wait)" },
     { id: "parking", label: "Mokamas parkavimas", short: "P", swatch: "var(--sign-blue)" },
-    { id: "bikeshare", label: "Cyclocity stotelės", short: "Dviračiai", swatch: "#22d3ee" },
+    { id: "bikeshare", label: "Cyclocity dviračiai", short: "Dviračiai", swatch: "#22d3ee" },
     { id: "scooters", label: "Paspirtukai", short: "Paspirtukai", swatch: "#f472b6" },
   ];
   return (

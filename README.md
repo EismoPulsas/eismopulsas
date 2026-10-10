@@ -36,11 +36,13 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 | [Via Lietuva – eismoinfo.lt](https://eismoinfo.lt/traffic-intensity-service) | gyvas vidutinis greitis kelių jutikliuose (kas 15 min.) |
 | [Vilniaus m. sav. – vietinės rinkliavos zonos](https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer) | parkavimo kainos ir laikas |
 | [Klaipėdos m. sav. – parkavimo zonos](https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer) | parkavimo kainos ir laikas |
-| [Cyclocity Vilnius GBFS](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | viešųjų dviračių stotelės realiu laiku |
 | [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | automobilio, dviračio, pėsčiųjų maršrutai |
 | [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
-| Esri Canvas | žemėlapio pagrindas |
+| [Cyclocity Vilnius (GBFS)](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | dviračių nuomos stotelės ir laisvi dviračiai, gyvai |
+| [OpenFreeMap](https://openfreemap.org) | vektorinis žemėlapio pagrindas (MapLibre) |
+
+Visas sąrašas su endpoint'ais, podėliu ir licencijomis: [DUOMENYS.md](DUOMENYS.md).
 
 Bilietų kainos – `lib/fares.ts` (Vilnius – JUDU, Kaunas – kaunas.lt; kitų miestų ir tarpmiestinių – apytikslės, UI rodo „≈“).
 Degalų kainos – LEA vidurkiai, vartotojas gali pasikeisti.

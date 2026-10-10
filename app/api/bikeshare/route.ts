@@ -1,10 +1,14 @@
-// Cyclocity Vilnius stations with live bikes / free docks (official GBFS), for the map layer.
+// Vilnius Cyclocity bike-share stations with live availability, for the map layer.
 //
-//   GET /api/bikeshare  ->  { updated, stations: [{ id, name, pos, capacity, bikes, docks, renting }] }
+//   GET /api/bikeshare  ->  { stations: [{ id, name, address, pos, capacity, bikes, docks, open }] }
 
-import { cyclocityStations } from "@/lib/server/micromobility";
+import { bikeStations } from "@/lib/server/bikeshare";
 
 export async function GET() {
-  const data = await cyclocityStations();
-  return Response.json(data, { headers: { "Cache-Control": "public, max-age=60, s-maxage=60" } });
+  try {
+    const stations = await bikeStations();
+    return Response.json({ stations }, { headers: { "Cache-Control": "public, max-age=60, s-maxage=60" } });
+  } catch {
+    return Response.json({ stations: [] }, { status: 502 });
+  }
 }
