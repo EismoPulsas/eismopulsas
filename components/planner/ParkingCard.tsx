@@ -222,7 +222,7 @@ export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: Map
     <div
       role="dialog"
       aria-label={title}
-      className="pointer-events-auto absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--panel)] shadow-[0_20px_50px_rgba(15,23,42,0.2)] sm:w-[360px]"
+      className="pointer-events-auto absolute top-0 left-0 z-[600] flex max-h-full w-full flex-col overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--panel)] shadow-[0_20px_50px_rgba(15,23,42,0.2)] sm:w-[360px]"
     >
       <div className="flex items-start gap-3 p-3.5 pb-2.5">
         <PlaceIcon {...icon} />

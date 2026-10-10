@@ -19,8 +19,8 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 - **Paspirtukai:** žemėlapio sluoksnis ir maršrutas iki artimiausio paspirtuko. Tikrų duomenų kol kas nėra (Bolt ir kt.
   Lietuvoje atvirų GBFS neskelbia), todėl preview aplinkoje rodomi aiškiai pažymėti **DEMO** duomenys – žr. „Paspirtukų duomenys“
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
-- **Orai:** Meteo.lt prognozė ir Open-Meteo lietaus tikimybė kelionės pradžioje – kortelė rezultatuose ir žymė žemėlapyje.
-  Esant lietui, sniegui, slidžiai dangai ar stipriam vėjui dviratis ir paspirtukas nerekomenduojami (lieka sąraše su perspėjimu)
+- **Orai:** Meteo.lt prognozė ir Open-Meteo lietaus tikimybė kelionės pradžioje – kompaktiška žymė žemėlapyje; paspaudus išskleidžiama prognozė.
+  Kelionės pasirinkimuose rodomi tik tinkami būdai: per ilgi ir dėl prastų orų nerekomenduojami variantai paslepiami, įskaitant derinius su automobiliu.
 - **VT stotelės žemėlapyje:** priartinus matomos visos stotelės maršrutų spalvomis; užvedus – maršrutai, paspaudus – artimiausi išvykimai
 - **Telefone:** žemėlapis per visą ekraną, kompaktiška paieška viršuje, tempiamas rezultatų skydelis
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
@@ -40,7 +40,8 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
   didžiausias ėjimas, bilietai, prioritetas – saugoma tik naršyklėje
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
 - Žemėlapio sluoksniai (telefone – po mygtuku „Sluoksniai“): A juostos, VT stotelės, gyvas eismas (eismoinfo.lt), Cyclocity stotelės, parkavimas (zonos, aikštelės su gyvu laisvų vietų skaičiumi, stovėjimas
-  gatvėse ir draudžiamos zonos priartinus, kortelė su kainomis ir užimtumo grafiku), įkrovimas (tik elektromobiliams)
+  gatvėse ir draudžiamos zonos priartinus, kortelė su kainomis ir užimtumo grafiku), įkrovimas (tik elektromobiliams).
+  Visi sluoksniai pradžioje išjungti; pasirinkus automobilį, Cyclocity ar paspirtuką įjungiamas tam būdui aktualus sluoksnis prie maršruto.
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
 
 ## Duomenų šaltiniai

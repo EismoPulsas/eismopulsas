@@ -48,20 +48,28 @@ export function WeatherCard({ w }: { w: TripWeather }) {
   );
 }
 
-/** Compact chip for the map. */
+/** Compact map badge; forecast details stay outside the travel options. */
 export function WeatherChip({ w }: { w: TripWeather }) {
   const risk = RISK[w.risk];
+  const readings = [
+    w.temp !== null ? `${num(w.temp)}°` : null,
+    w.rainChance !== null ? `Lietus ${w.rainChance} %` : null,
+  ].filter(Boolean).join(" · ") || w.label;
   return (
-    <div
-      className="flex items-center gap-1.5 rounded-full border bg-[var(--bg)]/90 px-2.5 py-1.5 text-xs font-semibold shadow-lg backdrop-blur"
-      style={{ borderColor: `color-mix(in oklab, ${risk.color} 60%, var(--line))`, color: risk.color }}
-      title={`${w.label}${w.place ? ` · ${w.place}` : ""}`}
-    >
-      <WeatherIcon w={w} size={16} />
-      <span className="tnum text-[var(--ink)]">
-        {w.temp !== null ? `${w.temp}°` : ""}
-        {w.rainChance !== null ? ` · ${w.rainChance} %` : ""}
-      </span>
-    </div>
+    <details className="group relative">
+      <summary
+        className="flex h-10 w-fit max-w-full cursor-pointer list-none items-center gap-1.5 rounded-full border bg-[var(--panel)]/95 px-3.5 text-xs font-semibold shadow-lg backdrop-blur focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--marking)] [&::-webkit-details-marker]:hidden"
+        style={{ borderColor: `color-mix(in oklab, ${risk.color} 60%, var(--line))`, color: risk.color }}
+        aria-label={`Orai: ${readings}. ${risk.text}. Išsami prognozė`}
+        title={`${w.label}${w.place ? ` · ${w.place}` : ""}. ${risk.text}`}
+      >
+        <span className="shrink-0"><WeatherIcon w={w} size={16} /></span>
+        <span className="tnum truncate text-[var(--ink)]">{readings}</span>
+        {w.risk !== "ok" && <span className={`signal shrink-0 ${w.risk === "caution" ? "wait" : "stop"}`} aria-hidden />}
+      </summary>
+      <div className="absolute top-[var(--map-popover-offset,52px)] left-0 w-[min(320px,calc(100vw-24px))] rounded-2xl shadow-xl">
+        <WeatherCard w={w} />
+      </div>
+    </details>
   );
 }

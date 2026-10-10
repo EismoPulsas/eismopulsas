@@ -39,7 +39,6 @@ import { useCarDrive } from "./useCarDrive";
 import { useHybrids } from "./useHybrids";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
 import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps } from "./Trip";
-import { WeatherCard } from "./Weather";
 
 /** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
 const PANEL_LEFT = 24 + 560;
@@ -93,7 +92,7 @@ export default function Planner() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OptionId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
-  const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false, stops: true });
+  const [layers, setLayers] = useState<Layers>({ lanes: false, traffic: false, parking: false, charging: false, bikeshare: false, scooters: false, stops: false });
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /** Where the car option leaves the car; null = the best one for the priority. */
@@ -214,11 +213,13 @@ export default function Planner() {
   }, [queryKey, refresh]);
 
   const modes = useMemo(() => (plan ? summarize(plan, tripSettings, chosenParking?.id).map((m) =>
-    m.id === "car" && (updatingCar || driving.error) ? { ...m, feasible: false, why: driving.error ?? "Atnaujinamas važiavimo laikas…" } : m) : []),
+    m.id === "car" && (updatingCar || driving.error) ? { ...m, feasible: false, why: driving.error ?? "Atnaujinamas važiavimo laikas…" } : m)
+    .filter((m) => m.feasible && !m.weatherWarning) : []),
     [plan, tripSettings, chosenParking?.id, updatingCar, driving.error]);
   // Car + second leg: leave the car on the way (P+R, cheap parking, a charger) and continue.
   const hybridState = useHybrids(currentPlan, tripSettings, !loading);
-  const hybrids = useMemo(() => (plan && hybridState.options.length ? summarizeHybrids(plan, hybridState.options, tripSettings) : []), [plan, hybridState.options, tripSettings]);
+  const hybrids = useMemo(() => (plan && hybridState.options.length ? summarizeHybrids(plan, hybridState.options, tripSettings)
+    .filter((h) => h.feasible && !h.weatherWarning) : []), [plan, hybridState.options, tripSettings]);
   const ranking = useMemo(() => rank<ModeSummary | HybridSummary>([...modes, ...hybrids], settings.priority), [modes, hybrids, settings.priority]);
   const sig = useMemo((): Signals => {
     const all = [...modes, ...hybrids];
@@ -236,7 +237,7 @@ export default function Planner() {
   useEffect(() => {
     if (!plan || !hybridState.settled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected((prev) => (prev && !isHybridId(prev) ? prev : null) ?? ranking.best);
+    setSelected((prev) => (prev && !isHybridId(prev) && ranking.scores.has(prev) ? prev : null) ?? ranking.best);
     const alts = [...ranking.scores].filter(([id]) => id !== "car" && !isHybridId(id)).sort((a, b) => a[1] - b[1]);
     if (alts.length) setAlt(alts[0][0] as Exclude<ModeId, "car">);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -323,12 +324,22 @@ export default function Planner() {
   const bestMode = isHybridId(best) ? null : best;
   const bestHybrid = isHybridId(best) ? hybrids.find((h) => h.id === best) : undefined;
   const car = modes.find((m) => m.id === "car");
-  const sel = isHybridId(selected) ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === bestMode) ?? null);
+  const sel = selectedHybrid ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === ranking.best) ?? modes[0] ?? null);
   const collapsed = !!plan && !editing;
+  const showRouteScope = !!plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging));
 
   return (
     <div className="relative h-dvh overflow-hidden">
-      <main className="absolute inset-0" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
+      <main
+        className={`absolute inset-0 ${showRouteScope ? "[--map-popover-offset:104px] min-[1280px]:[--map-popover-offset:52px]" : "[--map-popover-offset:52px]"}`}
+        style={{
+          "--map-bottom": `${sheetPx}px`,
+          "--map-overlay-top": `${phone ? topPx + 12 : 24}px`,
+          "--map-overlay-left": `${phone ? 12 : PANEL_LEFT + 24}px`,
+          "--map-overlay-right": `${phone ? 12 : 24}px`,
+          "--map-overlay-bottom": `${phone ? sheetPx + 12 : 24}px`,
+        } as React.CSSProperties}
+      >
         <MapView
           from={from?.pos ?? null}
           to={to?.pos ?? null}
@@ -363,7 +374,10 @@ export default function Planner() {
         )}
         {picked && (
           // On phones the card sits between the search card and the results sheet.
-          <div className="pointer-events-none absolute right-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}>
+          <div
+            className="pointer-events-none absolute z-[600]"
+            style={{ top: "calc(var(--map-overlay-top) + var(--map-popover-offset))", bottom: "var(--map-overlay-bottom)", left: "var(--map-overlay-left)", right: "var(--map-overlay-right)" }}
+          >
             <ParkingCard
               pick={picked}
               live={live}
@@ -569,8 +583,13 @@ export default function Planner() {
                   </button>
                 </div>
 
-                {plan.weather && <WeatherCard w={plan.weather} />}
                 <ModeMatrix plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} onSelect={selectMode} />
+                {!modes.length && !hybrids.length && !updatingCar && hybridState.settled && (
+                  <p role="status" className="rounded-xl bg-[var(--chip)] p-3 text-sm text-[var(--muted)]">
+                    Šiai kelionei tinkamų būdų neradome. Pabandykite kitą išvykimo laiką arba pakeiskite kelionės nustatymus.
+                  </p>
+                )}
+                {driving.error && <p role="status" className="text-sm text-[var(--stop)]">{driving.error}</p>}
                 {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
 
                 {/* Car + second leg (P+R, VT, Cyclocity, scooter): the best one open, the rest folded. */}

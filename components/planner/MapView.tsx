@@ -13,6 +13,7 @@ import type { Charger, Connector, HybridOption, Lot, PlanResponse, RideLeg, Tran
 import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
 import { bikeStatus, FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, speedStatus, STATUS, ZONE_COLOR, type Area, type BikeStation, type MapPick, type Sensor, type Zone } from "./parking-meta";
+import { WeatherChip } from "./Weather";
 
 export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean; stops: boolean };
 /** What covers the map: the phone search card and sheet, or the desktop panel on the left. */
@@ -905,6 +906,29 @@ export default function MapView({
         )}
         {to && <Marker position={to} icon={PIN_B} draggable eventHandlers={{ dragend: (e) => onMove("to", [e.target.getLatLng().lat, e.target.getLatLng().lng]) }} />}
       </MapContainer>
+      <div
+        className="pointer-events-none absolute z-[700] grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 min-[1280px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+        style={{ top: "var(--map-overlay-top)", left: "var(--map-overlay-left)", right: "var(--map-overlay-right)" }}
+      >
+        <div className="pointer-events-auto relative z-10 col-start-1 row-start-1 min-w-0">
+          {plan?.weather && <WeatherChip key={`${plan.depart.at}:${plan.from.join(",")}`} w={plan.weather} />}
+        </div>
+        {plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging)) && (
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            className="pointer-events-auto col-span-2 col-start-1 row-start-2 flex h-10 min-w-0 items-center justify-center gap-2 justify-self-center rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur hover:bg-[var(--panel)] min-[1280px]:col-span-1 min-[1280px]:col-start-2 min-[1280px]:row-start-1"
+            aria-pressed={showAll}
+          >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${showAll ? "bg-[var(--muted)]" : "bg-[var(--marking)]"}`} />
+            <span className="hidden min-[1280px]:inline">{showAll ? "Rodomas visas miestas" : "Rodoma tik prie maršruto"}</span>
+            <span className="text-[var(--marking)]">{showAll ? "Tik prie maršruto" : "Rodyti viską"}</span>
+          </button>
+        )}
+        <div className="col-start-2 row-start-1 justify-self-end min-[1280px]:col-start-3">
+          <LayersPanel layers={layers} onChange={onLayers} ev={ev} theme={theme} onTheme={pickTheme} zoom={zoom} stations={bikeshare?.stations ?? null} />
+        </div>
+      </div>
       {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
         <div
           className="pointer-events-none absolute z-[500] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--panel)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
@@ -923,21 +947,6 @@ export default function MapView({
           )}
         </div>
       )}
-      {plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging)) && (
-        <button
-          type="button"
-          onClick={() => setShowAll(!showAll)}
-          className={`absolute z-[500] flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 py-2 text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur hover:bg-[var(--panel)] ${padding.left ? "-translate-x-1/2" : "left-3"}`}
-          style={{ top: padding.top + 12, left: padding.left ? `calc(50% + ${padding.left / 2}px)` : undefined }}
-          aria-pressed={showAll}
-        >
-          <span className={`h-2 w-2 rounded-full ${showAll ? "bg-[var(--muted)]" : "bg-[var(--marking)]"}`} />
-          {/* Phones: just the action, so it fits beside the layers button. */}
-          <span className={padding.left ? "" : "hidden"}>{showAll ? "Rodomas visas miestas" : "Rodoma tik prie maršruto"}</span>
-          <span className="text-[var(--marking)]">{showAll ? "Tik prie maršruto" : "Rodyti viską"}</span>
-        </button>
-      )}
-      <LayersPanel layers={layers} onChange={onLayers} ev={ev} theme={theme} onTheme={pickTheme} zoom={zoom} top={padding.top} bottom={padding.bottom} stations={bikeshare?.stations ?? null} />
     </div>
   );
 }
@@ -968,8 +977,6 @@ function LayersPanel({
   theme,
   onTheme,
   zoom,
-  top,
-  bottom,
   stations,
 }: {
   layers: Layers;
@@ -978,8 +985,6 @@ function LayersPanel({
   theme: MapTheme;
   onTheme: (t: MapTheme) => void;
   zoom: number;
-  top: number;
-  bottom: number;
   stations: BikeStation[] | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -1082,12 +1087,12 @@ function LayersPanel({
   const active = groups.flatMap((g) => g.rows).filter((r) => layers[r.id]);
 
   return (
-    <div className="absolute right-3 z-[700] flex flex-col items-end gap-2" style={{ top: top + 12, maxHeight: `calc(100% - ${top + bottom + 24}px)` }}>
+    <div className="pointer-events-auto relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)] px-3.5 py-2 text-sm font-semibold shadow-lg"
+        className="flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-sm font-semibold shadow-lg backdrop-blur"
       >
         {LAYERS_ICON}
         Sluoksniai
@@ -1100,7 +1105,10 @@ function LayersPanel({
         )}
       </button>
       {open && (
-        <div className="w-[min(320px,calc(100vw-24px))] overflow-y-auto overscroll-contain rounded-[20px] border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[0_20px_50px_rgba(15,23,42,0.2)]">
+        <div
+          className="absolute top-[var(--map-popover-offset)] right-0 w-[min(320px,calc(100vw-24px))] overflow-y-auto overscroll-contain rounded-[20px] border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[0_20px_50px_rgba(15,23,42,0.2)]"
+          style={{ maxHeight: "calc(100dvh - var(--map-overlay-top) - var(--map-popover-offset) - var(--map-overlay-bottom))" }}
+        >
           {groups.map((g) => (
             <section key={g.title} className="mb-1">
               <h3 className="eyebrow px-2 pt-2 pb-1 !text-[11px]">{g.title}</h3>

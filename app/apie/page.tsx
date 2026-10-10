@@ -153,7 +153,8 @@ export default function About() {
             <li>
               <b>Orai ir dviratis / paspirtukas:</b> tikriname orus A taške kelionės valandomis. Jei lietaus tikimybė ≥ 60 %, prognozuojamas lietus,
               šlapdriba ar sniegas, kritulių ≥ 0,5 mm/val., vėjo gūsiai ≥ 15 m/s ar slidu (≤ 0 °C su krituliais) – dviratis, Cyclocity ir paspirtukas
-              lieka sąraše, bet nebūna rekomenduojami („Nerekomenduojama: …“). Jei kitų būdų nėra, rekomenduojamas vis tiek greičiausias iš jų.
+              paslepiami iš kelionės pasirinkimų, įskaitant derinius su automobiliu. Prastu oru paslepiamas ir ilgesnis nei 15 min. ėjimas.
+              Jei tinkamų būdų nėra, siūlome pakeisti išvykimo laiką ar kelionės nustatymus. Išsami prognozė atidaroma paspaudus orų žymę žemėlapyje.
               Tikimybė 30–60 %, nedidelis lietus, gūsiai ≥ 11 m/s ar ≤ 2 °C – perspėjame „atsargiai“, bet rekomendacijos nekeičiame.
             </li>
             <li>
