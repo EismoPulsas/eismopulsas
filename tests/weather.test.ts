@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rank, type ModeSummary } from "../lib/metrics";
+import { DEFAULT_SETTINGS, rank, summarize, type ModeSummary } from "../lib/metrics";
 import { createTripWeather } from "../lib/server/weather";
 
 const pos: [number, number] = [54.68, 25.28];
@@ -52,4 +52,17 @@ test("bad weather keeps the bike from being recommended, unless nothing else is 
   // On its own numbers the bike would win easily (fastest and free).
   assert.notEqual(rank([bike, mode("transit", 1500, 1), mode("car", 1200, 4)], "balanced").best, "bike");
   assert.equal(rank([bike, mode("walk", 3600, 0, { feasible: false })], "balanced").best, "bike");
+});
+
+test("in bad weather a long walk is not recommended either, a short one is", () => {
+  const plan = (walkMin: number) =>
+    ({
+      from: pos, to: pos, depart: { date: "2026-10-12", sec: 8 * 3600, weekday: 1, isNow: false, at: new Date().toISOString() }, straight: 3000,
+      car: null, bike: null, bikeshare: null, bikeshareNote: null, scooter: null, transit: null, transitNote: null,
+      walk: { distance: 3000, duration: walkMin * 60, geometry: [pos, pos] },
+      timetable: { built: "", window: "", shifted: false },
+      weather: { place: null, condition: "rain", label: "Lietus", temp: 9, feelsLike: 7, wind: 4, gust: 8, precip: 1.5, rainChance: 90, risk: "bad", reasons: ["lietus"], forecastCreatedAt: null },
+    }) as unknown as Parameters<typeof summarize>[0];
+  assert.ok(summarize(plan(40), DEFAULT_SETTINGS).find((m) => m.id === "walk")?.weatherWarning);
+  assert.equal(summarize(plan(10), DEFAULT_SETTINGS).find((m) => m.id === "walk")?.weatherWarning, undefined);
 });

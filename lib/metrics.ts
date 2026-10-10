@@ -23,6 +23,8 @@ export const FUELS: Record<Fuel, { label: string; unit: string; consumption: num
 export const WEAR_PER_KM = 0.12;
 /** kg CO₂ one grown tree absorbs per year. */
 export const TREE_KG_YEAR = 22;
+/** In bad weather a walk longer than this (s) is not recommended either. */
+export const WET_WALK_MAX = 15 * 60;
 /** Weeks a year a commuter actually travels (holidays off). */
 export const WEEKS_PER_YEAR = 46;
 /** Shared e-scooter, life cycle incl. collection vans and battery swaps (ITF 2020, newer fleets). */
@@ -454,11 +456,14 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
     });
   }
 
-  // Rain, ice or a gale: riding a bike or scooter is not recommended.
+  // Rain, ice or a gale: riding a bike or scooter is not recommended, nor is a long walk.
   const wx = plan.weather;
   if (wx?.risk === "bad") {
     const why = `Nerekomenduojama: ${wx.reasons.join(", ")}`;
-    for (const m of out) if (m.id === "bike" || m.id === "bikeshare" || m.id === "scooter") m.weatherWarning = why;
+    for (const m of out) {
+      if (m.id === "bike" || m.id === "bikeshare" || m.id === "scooter") m.weatherWarning = why;
+      if (m.id === "walk" && m.duration > WET_WALK_MAX) m.weatherWarning = why;
+    }
   }
   return out;
 }
