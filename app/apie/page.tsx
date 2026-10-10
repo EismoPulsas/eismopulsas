@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { FARES } from "@/lib/fares";
-import { FUELS, TREE_KG_YEAR, WEAR_PER_KM, WEEKS_PER_YEAR } from "@/lib/metrics";
+import { BIKESHARE_EXTRA_PER_30, DEFAULT_SETTINGS, FUELS, SCOOTER_CO2_KM, TREE_KG_YEAR, WEAR_PER_KM, WEEKS_PER_YEAR } from "@/lib/metrics";
 
 export const metadata: Metadata = { title: "Kaip skaičiuojame" };
 
@@ -38,6 +38,12 @@ const SOURCES = [
     use: "Zonos ribos, kaina už valandą ir kada mokama – automobilio kainai.",
   },
   {
+    name: "Cyclocity Vilnius viešieji dviračiai (GBFS)",
+    who: "JCDecaux / Cyclocity",
+    url: "https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json",
+    use: "Stotelės, laisvi dviračiai ir vietos realiu laiku – viešojo dviračio maršrutui.",
+  },
+  {
     name: "Gatvių maršrutai",
     who: "OSRM (FOSSGIS) pagal OpenStreetMap",
     url: "https://routing.openstreetmap.de/",
@@ -45,9 +51,9 @@ const SOURCES = [
   },
   {
     name: "Adresų paieška",
-    who: "OpenStreetMap Nominatim",
-    url: "https://nominatim.openstreetmap.org/",
-    use: "Adresai ir vietos tik Lietuvoje.",
+    who: "Photon (komoot) pagal OpenStreetMap, atsarginis – Nominatim",
+    url: "https://photon.komoot.io/",
+    use: "Adresai ir vietos tik Lietuvoje; VT stotelės – iš tvarkaraščių.",
   },
 ];
 
@@ -67,7 +73,7 @@ export default function About() {
         <section>
           <h1 className="font-display text-3xl font-bold">Kaip skaičiuojame</h1>
           <p className="mt-2 text-[var(--muted)]">
-            Eismo Pulsas palygina keturis būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
+            Eismo Pulsas palygina būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, viešuoju dviračiu, paspirtuku, savo dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
             sutaupytumėte ar prarastumėte palikę automobilį namie. Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų.
           </p>
           <div className="lane-divider mt-6" />
@@ -88,6 +94,14 @@ export default function About() {
             <li>
               <b>A juostos:</b> autobuso maršrutas sutapatinamas su A / A+ juostų gatvėmis (±15 m). Tvarkaraščiai jau įskaičiuoja, kad autobusas ten nestovi spūstyje, o
               automobiliui toje pačioje gatvėje taikomas spūsčių priedas.
+            </li>
+            <li>
+              <b>Cyclocity dviratis (Vilnius):</b> ėjimas iki artimiausios stotelės, kurioje dabar yra laisvas dviratis, važiavimas (≈ 16 km/h) iki stotelės prie B su
+              laisva vieta ir ėjimas iki tikslo. Duomenys – oficialus Cyclocity GBFS srautas. Sistema veikia balandžio–spalio mėn.
+            </li>
+            <li>
+              <b>Paspirtukas:</b> vertinimas – ≈ 3 min. rasti ir atrakinti, ≈ 17 km/h važiuojant, 1 min. pastatyti. Bolt ir kiti operatoriai Lietuvoje
+              neskelbia atvirų GBFS duomenų (Bolt viešai juos teikia tik keliems miestams užsienyje), todėl tikslios paspirtuko vietos nežinome.
             </li>
             <li>
               <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
@@ -112,6 +126,10 @@ export default function About() {
               <b>Nusidėvėjimas</b> (pasirinktinai): {WEAR_PER_KM} €/km padangoms, servisui ir vertės kritimui.
             </li>
             <li>
+              <b>Cyclocity:</b> pirmos 30 min. kiekvienos kelionės nemokamos su bilietu (nuo 2,90 € / 3 d.), toliau ≈ {BIKESHARE_EXTRA_PER_30} € už 30 min.
+              <b> Paspirtukas:</b> atrakinimas + minutės (numatyta {DEFAULT_SETTINGS.scooterUnlock.toFixed(2)} € + {DEFAULT_SETTINGS.scooterPerMin.toFixed(2)} €/min, galite pakeisti).
+            </li>
+            <li>
               <b>Bilietai:</b>{" "}
               {Object.values(FARES)
                 .map((f) =>
@@ -130,6 +148,9 @@ export default function About() {
           <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed">
             <li>
               <b>Automobilis:</b> sudegintas kuras × emisijos koeficientas ({Object.values(FUELS).map((f) => `${f.label.toLowerCase()} ${f.co2} kg/${f.unit}`).join(", ")}).
+            </li>
+            <li>
+              <b>Paspirtukas:</b> ≈ {Math.round(SCOOTER_CO2_KM * 1000)} g/km per visą gyvavimo ciklą (gamyba, baterijos, surinkimo furgonai). Dviratis ir ėjimas – 0.
             </li>
             <li>
               <b>Viešasis transportas</b> vienam keleiviui: miesto autobusas ≈ 75 g/km, troleibusas ≈ 20 g/km, tarpmiestinis autobusas ≈ 35 g/km, keltas ≈ 120 g/km.
@@ -163,6 +184,7 @@ export default function About() {
           <pre className="overflow-x-auto rounded-xl bg-[var(--chip)] p-3 text-xs">
             {`GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876&depart=2026-10-12T08:00
 GET /api/traffic          # gyvi Via Lietuva jutikliai
+GET /api/bikeshare        # Cyclocity stotelės realiu laiku
 GET /api/geocode?q=Gedimino pr. 9, Vilnius`}
           </pre>
         </section>

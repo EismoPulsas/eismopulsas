@@ -51,6 +51,26 @@ export type CarResult = {
 
 export type ActiveResult = { distance: number; duration: number; geometry: LatLng[] };
 
+/** Station-based shared bikes (Cyclocity Vilnius, live GBFS). */
+export type BikeshareResult = {
+  system: string;
+  from: { name: string; pos: LatLng; bikes: number | null };
+  to: { name: string; pos: LatLng; docks: number | null };
+  walkTo: number;
+  walkFrom: number;
+  /** Ride distance between the stations. */
+  ride: number;
+  rideDuration: number;
+  duration: number;
+  geometry: LatLng[];
+  /** Availability checked against the live feed (only when leaving now). */
+  live: boolean;
+  updated: string | null;
+};
+
+/** Shared e-scooter: an estimate, no operator publishes open data in Lithuania. */
+export type ScooterResult = { city: string; distance: number; rideDuration: number; duration: number; geometry: LatLng[] };
+
 export type WalkLeg = {
   kind: "walk";
   from: LatLng;
@@ -100,6 +120,9 @@ export type PlanResponse = {
   car: CarResult | null;
   bike: ActiveResult | null;
   walk: ActiveResult | null;
+  bikeshare: BikeshareResult | null;
+  bikeshareNote: string | null;
+  scooter: ScooterResult | null;
   transit: TransitResult | null;
   transitNote: string | null;
   timetable: { built: string; window: string; shifted: boolean };

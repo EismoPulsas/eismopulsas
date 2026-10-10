@@ -1,7 +1,7 @@
 # Eismo Pulsas – kuo važiuoti iš A į B?
 
 Įrankis, padedantis išsirinkti geriausią būdą nukeliauti iš taško A į tašką B Lietuvoje: **automobiliu, viešuoju
-transportu, dviračiu ar pėsčiomis**. Kiekvienam būdui parodomas laikas (su spūstimis ir A juostomis), kaina (degalai,
+transportu, Cyclocity dviračiu, paspirtuku, savo dviračiu ar pėsčiomis**. Kiekvienam būdui parodomas laikas (su spūstimis ir A juostomis), kaina (degalai,
 parkavimas, bilietai) ir CO₂, o skiltis „Jei vietoj automobilio…“ – kiek pinigų, laiko ir CO₂ sutaupytumėte
 (ar prarastumėte) per kelionę ir per metus, ir kiek medžių tiek CO₂ sugertų.
 
@@ -9,16 +9,19 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 
 ## Kas veikia
 
-- A / B: adresų paieška, spustelėjimas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
+- A / B: adresų ir stotelių paieška rašant, smeigtukas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
 - Išvykimas dabar arba pasirinktu laiku
 - **Automobilis:** OSRM maršrutas + spūstys (gyvi Via Lietuva jutikliai magistralėse, piko valandų priedas miestuose) +
   parkavimo vietos paieška; kaina = degalai + mokamo parkavimo zona tikslo vietoje (+ pasirinktinai nusidėvėjimas)
 - **Viešasis transportas:** visos Lietuvos tvarkaraščiai (miestai, rajonai, tarpmiestiniai), RAPTOR maršrutizavimas su
   persėdimais, kiek kelio eina gatvėmis su A juosta, bilieto kaina pagal miestą, kitas reisas
+- **Cyclocity dviratis (Vilnius):** gyvi GBFS duomenys – artimiausia stotelė su laisvu dviračiu, stotelė prie B su laisva vieta
+- **Paspirtukas:** vertinimas (Bolt ir kt. Lietuvoje atvirų GBFS duomenų neskelbia), kainą galima pasikeisti
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
+- **Telefone:** žemėlapis per visą ekraną, kompaktiška paieška viršuje, tempiamas rezultatų skydelis
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
-- Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), mokamo parkavimo zonos
+- Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), mokamo parkavimo zonos, Cyclocity stotelės
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
 
 ## Duomenų šaltiniai
@@ -32,8 +35,9 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 | [Via Lietuva – eismoinfo.lt](https://eismoinfo.lt/traffic-intensity-service) | gyvas vidutinis greitis kelių jutikliuose (kas 15 min.) |
 | [Vilniaus m. sav. – vietinės rinkliavos zonos](https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer) | parkavimo kainos ir laikas |
 | [Klaipėdos m. sav. – parkavimo zonos](https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer) | parkavimo kainos ir laikas |
+| [Cyclocity Vilnius GBFS](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | viešųjų dviračių stotelės realiu laiku |
 | [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | automobilio, dviračio, pėsčiųjų maršrutai |
-| OpenStreetMap Nominatim | adresų paieška (per `/api/geocode`) |
+| [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
 | Esri Canvas | žemėlapio pagrindas |
 
@@ -64,7 +68,8 @@ Tvarkaraščiai galioja 6 savaites nuo paruošimo dienos (vėlesnei datai imama 
 ```
 GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876[&depart=2026-10-12T08:00]
 GET /api/traffic
-GET /api/geocode?q=Gedimino pr. 9, Vilnius
+GET /api/bikeshare
+GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 ```
 
 ## Struktūra
@@ -77,7 +82,9 @@ GET /api/geocode?q=Gedimino pr. 9, Vilnius
 - `lib/server/transit.ts` – RAPTOR maršrutizatorius per `data/transit.json.gz`
 - `lib/server/traffic.ts` – eismoinfo.lt jutikliai ir piko valandų vertinimas
 - `lib/server/osrm.ts`, `lanes.ts`, `parking.ts` – gatvių maršrutai, A juostos, parkavimo zonos
-- `app/api/*` – `plan`, `traffic`, `geocode`
+- `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko vertinimas
+- `components/planner/BottomSheet.tsx` – tempiamas rezultatų skydelis telefone
+- `app/api/*` – `plan`, `traffic`, `bikeshare`, `geocode`
 - `scripts/build-data.mjs` – duomenų paruošimas
 
 ## Darbo tvarka

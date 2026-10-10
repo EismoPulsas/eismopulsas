@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     "Kuo važiuoti iš A į B Lietuvoje: automobilis, viešasis transportas, dviratis ar pėsčiomis. Laikas su spūstimis ir A juostomis, kaina su parkavimu, CO₂ – iš atvirų miestų duomenų.",
 };
 
-export const viewport: Viewport = { themeColor: "#0c0e12" };
+export const viewport: Viewport = { themeColor: "#0c0e12", viewportFit: "cover" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -41,8 +41,13 @@ export function fmtCo2(kg: number): string {
 export const MODE_META = {
   car: { label: "Automobiliu", short: "Automobilis", color: "#ff5d6c" },
   transit: { label: "Viešuoju transportu", short: "Viešasis transportas", color: "#4b8bff" },
+  bikeshare: { label: "Cyclocity dviračiu", short: "Cyclocity dviratis", color: "#22d3ee" },
+  scooter: { label: "Paspirtuku", short: "Paspirtukas", color: "#f472b6" },
   bike: { label: "Dviračiu", short: "Dviratis", color: "#ffc53d" },
   walk: { label: "Pėsčiomis", short: "Pėsčiomis", color: "#b69cff" },
 } as const;
+
+/** One-word names for tabs and chips. */
+export const MODE_TAB = { car: "Auto", transit: "VT", bikeshare: "Cyclocity", scooter: "Paspirtukas", bike: "Dviratis", walk: "Pėsčiomis" } as const;
 
 export const ROUTE_TYPE: Record<number, string> = { 3: "Autobusas", 11: "Troleibusas", 4: "Keltas", 2: "Traukinys" };
