@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // The planner reads its timetable and map layers from disk at runtime.
+  outputFileTracingIncludes: {
+    "/api/plan": ["./data/transit.json.gz", "./public/data/bus-lanes.json", "./public/data/parking.json"],
+  },
 };
 
 export default nextConfig;

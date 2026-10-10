@@ -1,394 +1,575 @@
 #!/usr/bin/env node
-// Builds the static data files the app reads (public/data/*).
+// Builds the data files the route planner reads.
 //
-//   node scripts/build-data.mjs            # all years
-//   node scripts/build-data.mjs 2024 2025  # only these years
+//   npm run data            # everything
+//   npm run data -- transit # only one part: transit | lanes | parking | border
 //
-// Sources (all open data, no keys needed):
-//   - Policijos departamentas, EĮIS eismo įvykiai (data.gov.lt dataset 509)
-//   - Valstybės duomenų agentūra: gyventojai pagal savivaldybes ir amžių (osp-rs.stat.gov.lt SDMX API)
-//   - Valstybės duomenų agentūra: savivaldybių ribos (osp-sdg.stat.gov.lt ArcGIS)
-//   - Regitra: transporto priemonės pagal markę (get.data.gov.lt universal API)
+// Sources (all open, no keys needed):
+//   - LTSA nacionalinis prieigos taškas, visų Lietuvos viešojo transporto GTFS (visimarsrutai.lt)
+//   - stops.lt Šiaulių miesto GTFS (Šiaulių maršrutų nacionaliniame rinkinyje nėra)
+//   - SĮ „Susisiekimo paslaugos“ (JUDU): Vilniaus A / A+ juostos (ArcGIS FeatureServer)
+//   - OpenStreetMap (Overpass): autobusų juostos kituose miestuose
+//   - Vilniaus m. sav. (vplanas) ir Klaipėdos m. sav.: vietinės rinkliavos (parkavimo) zonos
+//   - geoBoundaries (OpenStreetMap): Lietuvos siena žemėlapio kaukei
 //
-// Raw downloads are cached in .cache/ (≈100 MB per year), so re-runs are fast.
+// Outputs:
+//   data/transit.json.gz      – compact timetable for the server-side router
+//   public/data/bus-lanes.json
+//   public/data/parking.json
+//   public/data/lithuania.json
+//
+// Raw downloads are cached in .cache/ for a day, so re-runs are fast.
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import zlib from "node:zlib";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const CACHE = path.join(ROOT, ".cache");
-const OUT = path.join(ROOT, "public", "data");
+const UA = "EismoPulsas/0.2 data builder (+https://github.com/EismoPulsas/eismopulsas)";
 
-// data.gov.lt distribution id for each year's yearly snapshot (ei_YYYY_12_31.json).
-const OFFICIAL = { 2021: 10856, 2022: 14438, 2023: 15652, 2024: 17389, 2025: 19566 };
-const UA = "Mozilla/5.0 (EismoPulsas data builder; +https://github.com/EismoPulsas/eismopulsas)";
+const FEEDS = [
+  { id: "lt", name: "LTSA nacionalinis prieigos taškas", url: "https://www.visimarsrutai.lt/gtfs/google_transit.zip" },
+  { id: "sia", name: "stops.lt – Šiauliai", url: "https://www.stops.lt/siauliai/siauliai/gtfs.zip", agency: "Šiaulių m. sav." },
+];
+const WINDOW_DAYS = 42;
 
 // ---------------------------------------------------------------- helpers
 
-async function exists(p) {
-  try { await fs.access(p); return true; } catch { return false; }
+async function cachedDownload(url, name) {
+  const dest = path.join(CACHE, name);
+  try {
+    const st = await fs.stat(dest);
+    if (Date.now() - st.mtimeMs < 20 * 3600 * 1000) return fs.readFile(dest);
+  } catch {}
+  console.log(`  ↓ ${url}`);
+  const res = await fetch(url, { headers: { "User-Agent": UA } });
+  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await fs.mkdir(CACHE, { recursive: true });
+  await fs.writeFile(dest, buf);
+  return buf;
 }
 
-// data.gov.lt sets a session cookie on the first hop and redirects to the file,
-// so follow redirects by hand and carry cookies along.
-async function download(url, dest) {
-  if (await exists(dest)) return;
-  let cookies = "";
-  for (let hop = 0; hop < 8; hop++) {
-    const res = await fetch(url, { redirect: "manual", headers: { "User-Agent": UA, Cookie: cookies } });
-    const set = res.headers.getSetCookie?.() ?? [];
-    if (set.length) cookies = [cookies, ...set.map((c) => c.split(";")[0])].filter(Boolean).join("; ");
-    if (res.status >= 300 && res.status < 400) {
-      url = new URL(res.headers.get("location"), url).toString();
-      continue;
-    }
-    if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.writeFile(dest, Buffer.from(await res.arrayBuffer()));
-    return;
-  }
-  throw new Error(`Too many redirects for ${url}`);
-}
-
-async function getJson(url, tries = 3) {
+async function getJson(url, init = {}, tries = 4) {
   for (let attempt = 1; ; attempt++) {
-    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (res.ok) return res.json();
-    // get.data.gov.lt answers the odd request with a 500; a retry usually works.
-    if (attempt >= tries || res.status < 500) throw new Error(`${url} -> HTTP ${res.status}`);
-    await new Promise((r) => setTimeout(r, 1000 * attempt));
+    try {
+      const res = await fetch(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...init.headers } });
+      if (res.ok) return await res.json();
+      if (res.status < 500 && res.status !== 429) throw Object.assign(new Error(`${url} -> HTTP ${res.status}`), { fatal: true });
+      if (attempt >= tries) throw new Error(`${url} -> HTTP ${res.status}`);
+    } catch (err) {
+      // Some CDN nodes time out on connect; DNS round-robin usually gives a working one next time.
+      if (err.fatal || attempt >= tries) throw err;
+    }
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
   }
 }
 
-// LKS-94 (EPSG:3346, Transverse Mercator on GRS80) -> WGS84 lat/lng.
-function lks94ToWgs84(x, y) {
-  const a = 6378137, f = 1 / 298.257222101, k0 = 0.9998, lon0 = (24 * Math.PI) / 180;
-  const e2 = f * (2 - f), ep2 = e2 / (1 - e2);
-  const M = y / k0;
-  const mu = M / (a * (1 - e2 / 4 - (3 * e2 ** 2) / 64 - (5 * e2 ** 3) / 256));
-  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
-  const phi1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
-    + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
-    + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
-  const s = Math.sin(phi1), c = Math.cos(phi1), t = Math.tan(phi1);
-  const N1 = a / Math.sqrt(1 - e2 * s * s);
-  const R1 = (a * (1 - e2)) / (1 - e2 * s * s) ** 1.5;
-  const C1 = ep2 * c * c, T1 = t * t;
-  const D = (x - 500000) / (N1 * k0);
-  const lat = phi1 - (N1 * t / R1) * (D * D / 2
-    - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
-    + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6 / 720);
-  const lng = lon0 + (D - (1 + 2 * T1 + C1) * D ** 3 / 6
-    + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / c;
-  return [(lat * 180) / Math.PI, (lng * 180) / Math.PI];
-}
-
-// "Šiaulių miesto sav." / "Šiaulių m. sav." -> "Šiaulių m. sav."
-const normMuni = (s) => s && s.replace(/\s+miesto\s+/, " m. ").replace(/\s+rajono\s+/, " r. ").trim();
-
-// Minutes since 2020-01-01 00:00 local time (stored as naive UTC on the client).
-const EPOCH = Date.UTC(2020, 0, 1);
-function toMinutes(s) {
-  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(s ?? "");
-  if (!m) return null;
-  return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - EPOCH) / 60000);
-}
-
-// Normalise vehicle makes so "VW" and "VOLKSWAGEN" count together.
-const MAKE_ALIASES = { VW: "VOLKSWAGEN", "MERCEDES BENZ": "MERCEDES-BENZ", MERCEDES: "MERCEDES-BENZ", "LAND-ROVER": "LAND ROVER", "ŠKODA": "SKODA", "CITROËN": "CITROEN", "KIA MOTORS": "KIA" };
-const normMake = (s) => {
-  if (!s) return null;
-  const up = s.trim().toUpperCase().replace(/\s+/g, " ");
-  return MAKE_ALIASES[up] ?? up;
-};
-
-// Bit flags stored per accident (kept in sync with lib/data.ts).
-const F = {
-  BIKE: 1, PEDESTRIAN: 2, SCOOTER: 4, MOTO: 8, DRUNK: 16, CHILD: 32, COUNTED: 64,
-  BUS_STOP: 128, BMW: 256, CROSSING: 512, TRUCK: 1024, FLED: 2048, ANIMAL: 4096,
-};
-
-const AGE_BUCKETS = [[0, 17], [18, 20], [21, 24], [25, 29], [30, 34], [35, 39], [40, 44], [45, 49], [50, 54], [55, 59], [60, 64], [65, 69], [70, 74], [75, 79], [80, 120]];
-const ageBucket = (a) => AGE_BUCKETS.findIndex(([lo, hi]) => a >= lo && a <= hi);
-const bucketLabel = ([lo, hi]) => (hi >= 120 ? `${lo}+` : lo === 0 ? `<${hi + 1}` : `${lo}–${hi}`);
-
-// ---------------------------------------------------------------- reference data
-
-async function loadPopulation() {
-  // S3R167_M3010214: residents at the start of the year by municipality and urban/rural.
-  const d = await getJson("https://osp-rs.stat.gov.lt/rest_json/data/S3R167_M3010214/?startPeriod=2021");
-  const dims = d.structure.dimensions.observation;
-  const munis = dims[0].values, place = dims[1].values, periods = dims.at(-1).values;
-  const totalIdx = place.findIndex((v) => v.name === "Miestas ir kaimas");
-  const out = {}; // code -> {name, pop: {year: n}}
-  for (const [key, val] of Object.entries(d.dataSets[0].observations)) {
-    const idx = key.split(":").map(Number);
-    if (idx[1] !== totalIdx) continue;
-    const m = munis[idx[0]];
-    if (!/sav\.$/.test(m.name)) continue;
-    const year = periods[idx.at(-1)].name;
-    (out[m.id] ??= { name: m.name, pop: {} }).pop[year] = val[0];
+/** Minimal ZIP reader: returns { name: Buffer } for the requested entries. */
+function unzip(buf, wanted) {
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  if (eocd < 0) throw new Error("Not a zip file");
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = {};
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(p + 10);
+    const csize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.toString("utf8", p + 46, p + 46 + nameLen).split("/").pop();
+    p += 46 + nameLen + extraLen + commentLen;
+    if (!wanted.includes(name)) continue;
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + csize);
+    out[name] = method === 0 ? data : zlib.inflateRawSync(data);
   }
   return out;
 }
 
-async function loadAgePopulation() {
-  // S3R167_M3010205: residents by single year of age (whole country, both sexes).
-  const d = await getJson("https://osp-rs.stat.gov.lt/rest_json/data/S3R167_M3010205/?startPeriod=2025&endPeriod=2025");
-  const dims = d.structure.dimensions.observation;
-  const ix = (id) => dims.findIndex((x) => x.id.startsWith(id));
-  const iPlace = ix("Vietove"), iAge = ix("Demogr_amzius"), iSex = ix("Lytis");
-  const placeAll = dims[iPlace].values.findIndex((v) => v.name === "Miestas ir kaimas");
-  const sexAll = dims[iSex].values.findIndex((v) => v.name === "Vyrai ir moterys");
-  const buckets = AGE_BUCKETS.map(() => 0);
-  for (const [key, val] of Object.entries(d.dataSets[0].observations)) {
-    const idx = key.split(":").map(Number);
-    if (idx[iPlace] !== placeAll || idx[iSex] !== sexAll) continue;
-    const age = parseInt(dims[iAge].values[idx[iAge]].name, 10);
-    if (Number.isNaN(age)) continue; // "Iš viso"
-    const b = ageBucket(age);
-    if (b >= 0) buckets[b] += val[0];
+/** CSV -> array of objects. Handles quoted fields and a BOM. */
+function* csvRows(buf) {
+  if (!buf) return;
+  let text = buf.toString("utf8");
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  let header = null;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const fields = [];
+    for (;;) {
+      let v = "";
+      if (text[i] === '"') {
+        i++;
+        for (;;) {
+          const q = text.indexOf('"', i);
+          if (q < 0) { v += text.slice(i); i = n; break; }
+          v += text.slice(i, q);
+          i = q + 1;
+          if (text[i] === '"') { v += '"'; i++; } else break;
+        }
+      } else {
+        let j = i;
+        while (j < n && text[j] !== "," && text[j] !== "\n" && text[j] !== "\r") j++;
+        v = text.slice(i, j);
+        i = j;
+      }
+      fields.push(v);
+      if (text[i] === ",") { i++; continue; }
+      if (text[i] === "\r") i++;
+      if (text[i] === "\n") i++;
+      break;
+    }
+    if (!header) { header = fields.map((f) => f.trim()); continue; }
+    if (fields.length === 1 && fields[0] === "") continue;
+    const row = {};
+    for (let k = 0; k < header.length; k++) row[header[k]] = fields[k] ?? "";
+    yield row;
   }
-  return buckets;
 }
 
-async function loadBoundaries() {
-  const url = "https://osp-sdg.stat.gov.lt/arcgis/rest/services/sav_11_2_1/FeatureServer/0/query"
-    + "?where=type%3D%27SAV%27&outFields=lau1,lau1_name&outSR=4326&maxAllowableOffset=0.003&geometryPrecision=4&f=geojson";
-  const gj = await getJson(url);
-  return gj.features.map((f) => ({ code: f.properties.lau1, name: f.properties.lau1_name, geometry: f.geometry }));
+const toSec = (s) => {
+  const m = /^(\d+):(\d\d):(\d\d)$/.exec(s.trim());
+  return m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : null;
+};
+const ymd = (d) => d.toISOString().slice(0, 10).replaceAll("-", "");
+
+/** Today's date in Lithuania as a UTC-midnight Date. */
+function vilniusToday() {
+  const s = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius" }).format(new Date());
+  return new Date(`${s}T00:00:00Z`);
 }
 
-// Regitra spells makes inconsistently ("VW", "VOLKSWAGEN AG", "KIA MOTORS"), so count by
-// prefix and add known short aliases.
-const REGITRA_EXTRA = { VOLKSWAGEN: ["VW"], "MERCEDES-BENZ": ["MERCEDES BENZ"] };
-async function regitraCount(make) {
-  const base = "https://get.data.gov.lt/datasets/gov/regitra/ktpr/ValstybinisNumeris/:format/json";
-  const filters = [`marke.startswith(${JSON.stringify(make)})`, ...(REGITRA_EXTRA[make] ?? []).map((a) => `marke=${JSON.stringify(a)}`)];
-  let total = 0;
-  for (const f of filters) {
-    try {
-      const d = await getJson(`${base}?${encodeURIComponent(f).replace(/%28/g, "(").replace(/%29/g, ")")}&count()`);
-      total += d._data?.[0]?.["count()"] ?? 0;
-    } catch (e) {
-      console.warn("  Regitra failed for", make, e.message);
-      return null;
+// Local metric projection around Lithuania, good enough for simplification.
+const KX = 111320 * Math.cos((55.2 * Math.PI) / 180), KY = 110540;
+
+function simplify(pts, tol) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const ax = pts[a][1] * KX, ay = pts[a][0] * KY, bx = pts[b][1] * KX, by = pts[b][0] * KY;
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    let best = -1, bestD = tol * tol;
+    for (let i = a + 1; i < b; i++) {
+      const px = pts[i][1] * KX, py = pts[i][0] * KY;
+      let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const ex = ax + t * dx - px, ey = ay + t * dy - py, d = ex * ex + ey * ey;
+      if (d > bestD) { bestD = d; best = i; }
+    }
+    if (best > 0) { keep[best] = 1; stack.push([a, best], [best, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+/** Google encoded polyline, precision 5. */
+function encodePolyline(pts) {
+  let out = "", plat = 0, plng = 0;
+  const enc = (v) => {
+    v = v < 0 ? ~(v << 1) : v << 1;
+    let s = "";
+    while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
+    return s + String.fromCharCode(v + 63);
+  };
+  for (const [lat, lng] of pts) {
+    const a = Math.round(lat * 1e5), b = Math.round(lng * 1e5);
+    out += enc(a - plat) + enc(b - plng);
+    plat = a; plng = b;
+  }
+  return out;
+}
+
+const round5 = (v) => Math.round(v * 1e5) / 1e5;
+
+// ---------------------------------------------------------------- transit
+
+function fareKey(agencyName) {
+  const n = agencyName.toLowerCase();
+  if (n.includes("transporto saugos")) return "intercity";
+  if (n.startsWith("vilniaus m")) return "vilnius";
+  if (n.startsWith("kauno m")) return "kaunas";
+  if (n.startsWith("klaipėdos m")) return "klaipeda";
+  if (n.startsWith("šiaulių m")) return "siauliai";
+  if (n.startsWith("panevėžio m")) return "panevezys";
+  if (n.startsWith("alytaus m")) return "alytus";
+  if (n.includes("perkėl")) return "ferry";
+  return "regional";
+}
+
+async function buildTransit() {
+  console.log("Transit (GTFS)…");
+  const base = vilniusToday();
+  const dates = Array.from({ length: WINDOW_DAYS }, (_, d) => new Date(base.getTime() + d * 86400000));
+  const dateKeys = dates.map(ymd);
+  const weekdayCol = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+  const out = {
+    v: 1,
+    built: new Date().toISOString(),
+    base: base.toISOString().slice(0, 10),
+    days: WINDOW_DAYS,
+    feeds: FEEDS.map((f) => ({ name: f.name, url: f.url })),
+    agencies: [],
+    routes: [],
+    stops: { name: [], lat: [], lng: [] },
+    services: [],
+    shapes: [],
+    patterns: [],
+  };
+
+  for (const feed of FEEDS) {
+    const zip = await cachedDownload(feed.url, `gtfs-${feed.id}.zip`);
+    const files = unzip(zip, [
+      "agency.txt", "routes.txt", "trips.txt", "stop_times.txt", "stops.txt",
+      "calendar.txt", "calendar_dates.txt", "shapes.txt",
+    ]);
+
+    // Services -> active-day bitmap over the window.
+    const cal = new Map();
+    for (const r of csvRows(files["calendar.txt"])) cal.set(r.service_id, r);
+    const exceptions = new Map();
+    for (const r of csvRows(files["calendar_dates.txt"])) {
+      if (!exceptions.has(r.service_id)) exceptions.set(r.service_id, new Map());
+      exceptions.get(r.service_id).set(r.date, r.exception_type);
+    }
+    const serviceIds = new Set([...cal.keys(), ...exceptions.keys()]);
+    const serviceIdx = new Map();
+    for (const sid of serviceIds) {
+      const c = cal.get(sid), ex = exceptions.get(sid);
+      let bits = "";
+      for (let d = 0; d < WINDOW_DAYS; d++) {
+        const key = dateKeys[d];
+        let on = false;
+        if (c && key >= c.start_date && key <= c.end_date && c[weekdayCol[dates[d].getUTCDay()]] === "1") on = true;
+        const e = ex?.get(key);
+        if (e === "1") on = true;
+        if (e === "2") on = false;
+        bits += on ? "1" : "0";
+      }
+      if (bits.includes("1")) {
+        serviceIdx.set(sid, out.services.length);
+        out.services.push(bits);
+      }
+    }
+
+    // Agencies & routes.
+    const agencyIdx = new Map();
+    for (const a of csvRows(files["agency.txt"])) {
+      const name = feed.agency ?? a.agency_name;
+      agencyIdx.set(a.agency_id || "_", out.agencies.length);
+      out.agencies.push({ name, fare: fareKey(name) });
+    }
+    const routeIdx = new Map();
+    for (const r of csvRows(files["routes.txt"])) {
+      const ai = agencyIdx.get(r.agency_id || "_") ?? agencyIdx.values().next().value;
+      routeIdx.set(r.route_id, out.routes.length);
+      out.routes.push([
+        r.route_short_name.trim(),
+        r.route_long_name.trim(),
+        +r.route_type,
+        r.route_color ? `#${r.route_color}` : "",
+        ai,
+      ]);
+    }
+
+    // Trips we keep (active in the window).
+    const trips = new Map();
+    for (const t of csvRows(files["trips.txt"])) {
+      const si = serviceIdx.get(t.service_id);
+      const ri = routeIdx.get(t.route_id);
+      if (si === undefined || ri === undefined) continue;
+      trips.set(t.trip_id, { si, ri, head: t.trip_headsign.trim(), shape: t.shape_id, st: [] });
+    }
+
+    // Stop times.
+    for (const r of csvRows(files["stop_times.txt"])) {
+      const t = trips.get(r.trip_id);
+      if (!t) continue;
+      const dep = toSec(r.departure_time || r.arrival_time);
+      const arr = toSec(r.arrival_time || r.departure_time);
+      if (dep === null) continue;
+      t.st.push([+r.stop_sequence, r.stop_id, arr, dep]);
+    }
+
+    // Stops (only those used).
+    const usedStops = new Set();
+    for (const t of trips.values()) {
+      t.st.sort((a, b) => a[0] - b[0]);
+      for (const s of t.st) usedStops.add(s[1]);
+    }
+    const stopIdx = new Map();
+    for (const s of csvRows(files["stops.txt"])) {
+      if (!usedStops.has(s.stop_id)) continue;
+      const lat = +s.stop_lat, lng = +s.stop_lon;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      stopIdx.set(s.stop_id, out.stops.name.length);
+      out.stops.name.push(s.stop_name.trim());
+      out.stops.lat.push(Math.round(lat * 1e5));
+      out.stops.lng.push(Math.round(lng * 1e5));
+    }
+
+    // Shapes (only those used), simplified.
+    const usedShapes = new Set([...trips.values()].map((t) => t.shape).filter(Boolean));
+    const rawShapes = new Map();
+    for (const r of csvRows(files["shapes.txt"])) {
+      if (!usedShapes.has(r.shape_id)) continue;
+      if (!rawShapes.has(r.shape_id)) rawShapes.set(r.shape_id, []);
+      rawShapes.get(r.shape_id).push([+r.shape_pt_sequence, +r.shape_pt_lat, +r.shape_pt_lon]);
+    }
+    const shapePts = new Map();
+    for (const [id, pts] of rawShapes) {
+      pts.sort((a, b) => a[0] - b[0]);
+      shapePts.set(id, simplify(pts.map((p) => [p[1], p[2]]), 6));
+    }
+    const shapeIdx = new Map();
+
+    // Group trips into patterns (same route + stop sequence + shape).
+    const patterns = new Map();
+    for (const t of trips.values()) {
+      if (t.st.length < 2 || t.st.some((s) => !stopIdx.has(s[1]))) continue;
+      const stops = t.st.map((s) => stopIdx.get(s[1]));
+      const key = `${t.ri}|${t.shape}|${stops.join(",")}`;
+      let p = patterns.get(key);
+      if (!p) {
+        p = { ri: t.ri, head: t.head, shape: t.shape, stops, profiles: new Map(), trips: [] };
+        patterns.set(key, p);
+      }
+      const start = t.st[0][3];
+      const dep = t.st.map((s) => s[3] - start);
+      const arr = t.st.map((s) => s[2] - start);
+      const pk = `${dep.join(",")}|${arr.join(",")}`;
+      if (!p.profiles.has(pk)) p.profiles.set(pk, { i: p.profiles.size, dep, arr });
+      p.trips.push([start, p.profiles.get(pk).i, t.si]);
+    }
+
+    for (const p of patterns.values()) {
+      let sh = -1, cut = null;
+      const pts = shapePts.get(p.shape);
+      if (pts && pts.length > 1) {
+        if (!shapeIdx.has(p.shape)) {
+          shapeIdx.set(p.shape, out.shapes.length);
+          out.shapes.push(encodePolyline(pts));
+        }
+        sh = shapeIdx.get(p.shape);
+        // Nearest shape vertex for each stop, moving forward along the shape.
+        cut = [];
+        let from = 0;
+        for (const s of p.stops) {
+          const sy = out.stops.lat[s] / 1e5, sx = out.stops.lng[s] / 1e5;
+          let best = from, bestD = Infinity;
+          for (let i = from; i < pts.length; i++) {
+            const d = ((pts[i][0] - sy) * KY) ** 2 + ((pts[i][1] - sx) * KX) ** 2;
+            if (d < bestD) { bestD = d; best = i; }
+          }
+          cut.push(best);
+          from = best;
+        }
+      }
+      p.trips.sort((a, b) => a[0] - b[0]);
+      const profiles = [...p.profiles.values()];
+      out.patterns.push({
+        r: p.ri,
+        h: p.head,
+        s: p.stops,
+        sh,
+        c: cut,
+        pd: profiles.map((x) => x.dep),
+        pa: profiles.map((x) => (x.arr.every((v, i) => v === x.dep[i]) ? 0 : x.arr)),
+        t: p.trips.flat(),
+      });
+    }
+    console.log(`  ${feed.id}: ${trips.size} trips, ${patterns.size} patterns, ${stopIdx.size} stops, ${shapeIdx.size} shapes`);
+  }
+
+  await fs.mkdir(path.join(ROOT, "data"), { recursive: true });
+  const gz = zlib.gzipSync(JSON.stringify(out), { level: 9 });
+  await fs.writeFile(path.join(ROOT, "data", "transit.json.gz"), gz);
+  console.log(`  → data/transit.json.gz (${(gz.length / 1e6).toFixed(1)} MB)`);
+}
+
+// ---------------------------------------------------------------- bus lanes
+
+const VILNIUS_BBOX = { s: 54.56, n: 54.84, w: 25.0, e: 25.49 };
+const inBox = (b, lat, lng) => lat >= b.s && lat <= b.n && lng >= b.w && lng <= b.e;
+
+async function buildLanes() {
+  console.log("Bus lanes…");
+  const lanes = [];
+
+  // Vilnius: official SĮSP (JUDU) layer of A and A+ lanes.
+  const sisp = "https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/A_juostos_WFL1_per%C5%BEi%C5%ABra/FeatureServer/0";
+  const gj = await getJson(`${sisp}/query?where=1%3D1&outFields=A_juostos_,Spalvinim&outSR=4326&f=geojson`);
+  for (const f of gj.features) {
+    const lines = f.geometry.type === "MultiLineString" ? f.geometry.coordinates : [f.geometry.coordinates];
+    for (const line of lines) {
+      lanes.push({
+        k: f.properties.Spalvinim === 2 ? "A+" : "A",
+        n: (f.properties.A_juostos_ ?? "").trim(),
+        c: line.map(([lng, lat]) => [round5(lat), round5(lng)]),
+      });
     }
   }
-  return total;
+  const official = lanes.length;
+
+  // Elsewhere: OpenStreetMap bus/PSV lanes.
+  const keys = [];
+  for (const k of ["bus:lanes", "psv:lanes", "lanes:bus", "lanes:psv"])
+    for (const s of ["", ":forward", ":backward"]) keys.push(k + s);
+  const q = `[out:json][timeout:180];area["ISO3166-1"="LT"][admin_level=2]->.lt;(${keys
+    .map((k) => `way(area.lt)["highway"]["${k}"];`)
+    .join("")}way(area.lt)["highway"]["busway"];way(area.lt)["highway"]["busway:right"];way(area.lt)["highway"]["busway:left"];way(area.lt)["highway"]["busway:both"];way(area.lt)["highway"="busway"];);out tags geom;`;
+  const osm = await getJson("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: new URLSearchParams({ data: q }),
+  });
+  const isLane = (tags) => {
+    if (tags.highway === "busway") return true;
+    for (const [k, v] of Object.entries(tags)) {
+      if (/^(bus|psv):lanes/.test(k) && v.split("|").includes("designated")) return true;
+      if (/^lanes:(bus|psv)/.test(k) && +v > 0) return true;
+      if (/^busway/.test(k) && v === "lane") return true;
+    }
+    return false;
+  };
+  for (const w of osm.elements) {
+    if (!w.geometry || !isLane(w.tags)) continue;
+    const mid = w.geometry[Math.floor(w.geometry.length / 2)];
+    if (inBox(VILNIUS_BBOX, mid.lat, mid.lon)) continue; // the city's own layer wins
+    lanes.push({ k: "OSM", n: w.tags.name ?? "", c: w.geometry.map((p) => [round5(p.lat), round5(p.lon)]) });
+  }
+
+  const file = {
+    updated: new Date().toISOString().slice(0, 10),
+    sources: [
+      { name: "SĮ „Susisiekimo paslaugos“ – Vilniaus A juostos", url: sisp },
+      { name: "OpenStreetMap (Overpass API)", url: "https://www.openstreetmap.org/copyright" },
+    ],
+    lanes,
+  };
+  await fs.mkdir(path.join(ROOT, "public", "data"), { recursive: true });
+  await fs.writeFile(path.join(ROOT, "public", "data", "bus-lanes.json"), JSON.stringify(file));
+  console.log(`  → public/data/bus-lanes.json (${official} official + ${lanes.length - official} OSM segments)`);
+}
+
+// ---------------------------------------------------------------- parking
+
+const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
+
+/** "I-VI 8-20 val." -> { days: [1..6], hours: [[8, 20]] } */
+function parseVilniusSchedule(s) {
+  const m = /^(I{1,3}|IV|VI{0,2}|V)\s*-\s*(I{1,3}|IV|VI{0,2}|V)\s+(\d+)\s*-\s*(\d+)/.exec(s.trim());
+  if (!m) return null;
+  const days = [];
+  for (let d = ROMAN[m[1]]; d <= ROMAN[m[2]]; d++) days.push(d);
+  return [{ days, hours: [[+m[3], +m[4]]] }];
+}
+
+const MONTHS = { sausio: 1, vasario: 2, kovo: 3, balandžio: 4, gegužės: 5, birželio: 6, liepos: 7, rugpjūčio: 8, rugsėjo: 9, spalio: 10, lapkričio: 11, gruodžio: 12 };
+
+/** Klaipėda's free-text schedule -> rules with optional seasons. */
+function parseKlaipedaSchedule(s) {
+  const rules = [];
+  // Split into seasonal clauses where present.
+  const seasonRe = /nuo\s+(\p{L}+)\s+(\d+)\s*d\.\s*iki\s+(\p{L}+)\s+(\d+)\s*d\.?\s*[–-]?\s*([^,]*?(?:val\.?|$)(?:[^,]*?val\.?)?)(?=,|\s*o\s|$)/gu;
+  const clauses = [];
+  let m;
+  while ((m = seasonRe.exec(s))) {
+    const from = MONTHS[m[1].toLowerCase()], to = MONTHS[m[3].toLowerCase()];
+    if (from && to) clauses.push({ season: [from * 100 + +m[2], to * 100 + +m[4]], text: m[5] });
+  }
+  if (!clauses.length) clauses.push({ season: null, text: s });
+  for (const c of clauses) {
+    const weekdaysOnly = /darbo dienomis|išskyrus šeštadienį/.test(c.text) || (!/kiekvieną dieną/.test(c.text) && /darbo/.test(s));
+    const hours = [...c.text.matchAll(/nuo\s+(\d+)[.:]\d\d\s+iki\s+(\d+)[.:]\d\d/g)].map((h) => [+h[1], +h[2]]);
+    if (!hours.length) continue;
+    rules.push({ season: c.season, days: weekdaysOnly ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 7], hours });
+  }
+  return rules.length ? rules : null;
+}
+
+function polygonsOf(geom) {
+  const polys = geom.type === "MultiPolygon" ? geom.coordinates : [geom.coordinates];
+  return polys.map((rings) => rings.map((ring) => simplify(ring.map(([lng, lat]) => [lat, lng]), 3).map(([a, b]) => [round5(a), round5(b)])));
+}
+
+async function buildParking() {
+  console.log("Parking zones…");
+  const zones = [];
+
+  const vln = "https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer/1";
+  const v = await getJson(`${vln}/query?where=1%3D1&outFields=Rinkliava,Mokama,Zona&outSR=4326&f=geojson`);
+  for (const f of v.features) {
+    const p = f.properties;
+    const price = +(/([\d,]+)\s*Eur/.exec(p.Rinkliava)?.[1] ?? "").replace(",", ".");
+    if (!price) continue;
+    const seasonal = /maudykl/i.test(p.Mokama);
+    const rules = seasonal ? [{ season: [601, 831], days: [1, 2, 3, 4, 5, 6, 7], hours: [[8, 20]] }] : parseVilniusSchedule(p.Mokama);
+    zones.push({ city: "Vilnius", zone: p.Zona, price, text: `${p.Rinkliava}, ${p.Mokama}`, rules, poly: polygonsOf(f.geometry) });
+  }
+
+  const kln = "https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer/0";
+  const k = await getJson(`${kln}/query?where=1%3D1&outFields=Zona,Pastabos,Mokestis,Rinkliava_renkama&outSR=4326&f=geojson`);
+  const kName = { R: "Raudonoji zona", GG: "Geltonoji zona", Z: "Žalioji zona" };
+  for (const f of k.features) {
+    const p = f.properties;
+    // "Iki 30 min. – 0,30 Eur" -> 0.60 €/h
+    const m = /Iki\s+(\d+)\s*min\.?\s*[–-]\s*([\d,]+)\s*Eur/i.exec(p.Mokestis ?? "");
+    if (!m || !f.geometry) continue;
+    const price = Math.round((+m[2].replace(",", ".") * 60) / +m[1] * 100) / 100;
+    zones.push({
+      city: "Klaipėda",
+      zone: kName[p.Pastabos] ?? `Zona ${p.Zona}`,
+      price,
+      text: `${m[1]} min. – ${m[2]} Eur; ${p.Rinkliava_renkama}`,
+      rules: parseKlaipedaSchedule(p.Rinkliava_renkama ?? ""),
+      poly: polygonsOf(f.geometry),
+    });
+  }
+
+  const file = {
+    updated: new Date().toISOString().slice(0, 10),
+    sources: [
+      { name: "Vilniaus m. sav. – vietinės rinkliavos zonos", url: vln },
+      { name: "Klaipėdos m. sav. – parkavimo zonos", url: kln },
+    ],
+    zones,
+  };
+  await fs.writeFile(path.join(ROOT, "public", "data", "parking.json"), JSON.stringify(file));
+  const unparsed = zones.filter((z) => !z.rules).length;
+  console.log(`  → public/data/parking.json (${zones.length} zones${unparsed ? `, ${unparsed} without parsed schedule` : ""})`);
+}
+
+// ---------------------------------------------------------------- border
+
+async function buildBorder() {
+  console.log("Lithuania border…");
+  const meta = await getJson("https://www.geoboundaries.org/api/current/gbOpen/LTU/ADM0/");
+  const gj = await getJson(meta.simplifiedGeometryGeoJSON);
+  const rings = [];
+  for (const f of gj.features) {
+    const polys = f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [f.geometry.coordinates];
+    for (const poly of polys) {
+      const outer = simplify(poly[0].map(([lng, lat]) => [lat, lng]), 120);
+      if (outer.length >= 4) rings.push(outer.map(([a, b]) => [round5(a), round5(b)]));
+    }
+  }
+  const file = { source: "geoBoundaries gbOpen LTU ADM0 (OpenStreetMap, ODbL)", rings };
+  await fs.writeFile(path.join(ROOT, "public", "data", "lithuania.json"), JSON.stringify(file));
+  console.log(`  → public/data/lithuania.json (${rings.length} rings, ${rings.reduce((a, r) => a + r.length, 0)} points)`);
 }
 
 // ---------------------------------------------------------------- main
 
-async function main() {
-  const years = process.argv.slice(2).map(Number).filter(Boolean);
-  const wanted = years.length ? years : Object.keys(OFFICIAL).map(Number);
-  await fs.mkdir(OUT, { recursive: true });
-
-  console.log("Gyventojai, ribos…");
-  const [population, agePop, boundaries] = await Promise.all([loadPopulation(), loadAgePopulation(), loadBoundaries()]);
-  // Statistics Lithuania lists all 60 municipalities; the boundary layer misses Visaginas.
-  const nameToCode = Object.fromEntries([
-    ...Object.entries(population).map(([code, p]) => [p.name, code]),
-    ...boundaries.map((b) => [b.name, b.code]),
-  ]);
-
-  // Aggregates over all years.
-  const muniStats = {}; // code -> year -> {all, counted, killed, injured, bike}
-  const makeStats = {}; // make -> {all, culprit, killed, byYear}
-  const ageStats = AGE_BUCKETS.map(() => ({ drivers: 0, culprits: 0, killed: 0, drunk: 0 }));
-  const streetStats = {}; // "code|street" -> {...}
-  const hourWeek = Array.from({ length: 7 }, () => Array(24).fill(0));
-  const yearTotals = {};
-  const busStops = []; // fun counter
-  const fun = { drunkCulprits: 0, culprits: 0, fled: 0, friday13: 0, animals: 0, scooters: 0, bikes: 0, busStops: 0 };
-  const busStopMakes = {};
-  const topAddresses = {};
-
-  for (const year of wanted) {
-    const file = path.join(CACHE, `ei_${year}.json`);
-    console.log(`${year}: atsisiunčiama / skaitoma…`);
-    await download(`https://data.gov.lt/datasets/509/distribution/${OFFICIAL[year]}/download/`, file);
-    const rows = JSON.parse(await fs.readFile(file, "utf8"));
-
-    const dict = { muni: [], street: [], kind: [] };
-    const index = { muni: new Map(), street: new Map(), kind: new Map() };
-    const intern = (k, v) => {
-      if (v == null || v === "") return -1;
-      let i = index[k].get(v);
-      if (i === undefined) { i = dict[k].length; dict[k].push(v); index[k].set(v, i); }
-      return i;
-    };
-    const cols = { lat: [], lng: [], t: [], k: [], i: [], m: [], s: [], r: [], f: [], id: [] };
-    let skipped = 0;
-    const unmatched = new Set();
-
-    for (const r of rows) {
-      const t = toMinutes(r.dataLaikas);
-      const ry = r.dataLaikas?.slice(0, 4);
-      // Snapshots include a few late-registered events from the previous year; keep only this year.
-      if (t == null || +ry !== year || !r.ilguma || !r.platuma) { skipped++; continue; }
-      const [lat, lng] = lks94ToWgs84(r.platuma, r.ilguma);
-      if (lat < 53.8 || lat > 56.5 || lng < 20.8 || lng > 26.9) { skipped++; continue; }
-
-      const muniName = normMuni(r.savivaldybe);
-      const code = nameToCode[muniName] ?? null;
-      if (muniName && !code) unmatched.add(muniName);
-
-      const people = r.eismoDalyviai ?? [];
-      const vehicles = r.eismoTranspPreimone ?? [];
-      let flags = 0;
-      const cats = people.map((p) => p.kategorija ?? "");
-      const vcats = vehicles.map((v) => v.kategorija ?? "");
-      if (cats.some((c) => c.startsWith("Dviračio")) || vcats.includes("Dviratis") || r.rusis === "Susidūrimas su dviračiu") flags |= F.BIKE;
-      if (cats.includes("Pėsčiasis") || r.rusis === "Užvažiavimas ant pėsčiojo") flags |= F.PEDESTRIAN;
-      if (cats.some((c) => c.includes("paspirtuk")) || vcats.includes("Elektrinis paspirtukas")) flags |= F.SCOOTER;
-      if (cats.some((c) => /Motociklo|Mopedo/.test(c)) || vcats.some((c) => /Motociklas|Mopedas/.test(c))) flags |= F.MOTO;
-      if (r.neblaivusKaltininkai === "Taip" || r.apsvaigeKaltininkai === "Taip" || r.atsisakeTikrintisKaltininkai === "Taip") flags |= F.DRUNK;
-      if ((r.zuvVaiku ?? 0) + (r.suzeistaVaiku ?? 0) > 0) flags |= F.CHILD;
-      if (r.iskaitinis === 1) flags |= F.COUNTED;
-      const elements = [r.kelioElementas1, r.kelioElementas2];
-      if (elements.includes("Keleivinio transporto sustojimo vieta")) flags |= F.BUS_STOP;
-      if (elements.includes("Pėsčiųjų perėja") || /perėjoje/.test(r.schema1 ?? "")) flags |= F.CROSSING;
-      const makes = vehicles.map((v) => normMake(v.marke));
-      if (makes.includes("BMW")) flags |= F.BMW;
-      if (vcats.some((c) => c.startsWith("Krovininis"))) flags |= F.TRUCK;
-      if (people.some((p) => p.pasisalino === "Taip") || vehicles.some((v) => v.pasisalino === "Taip")) flags |= F.FLED;
-      if (r.rusis === "Užvažiavimas ant gyvūno") flags |= F.ANIMAL;
-
-      const killed = r.zuvusiuSkaicius ?? 0, injured = r.suzeistuSkaicius ?? 0;
-      const street = r.gatve || r.kelioPavadinimas || null;
-
-      cols.lat.push(Math.round(lat * 1e5));
-      cols.lng.push(Math.round(lng * 1e5));
-      cols.t.push(t);
-      cols.k.push(killed);
-      cols.i.push(injured);
-      cols.m.push(intern("muni", code));
-      cols.s.push(intern("street", street));
-      cols.r.push(intern("kind", r.rusis));
-      cols.f.push(flags);
-      cols.id.push(r.registrokodas ?? "");
-
-      // ---- aggregates
-      const yt = (yearTotals[year] ??= { all: 0, counted: 0, killed: 0, injured: 0 });
-      yt.all++; yt.killed += killed; yt.injured += injured; if (flags & F.COUNTED) yt.counted++;
-      if (code) {
-        const ms = ((muniStats[code] ??= {})[year] ??= { all: 0, counted: 0, killed: 0, injured: 0, bike: 0 });
-        ms.all++; ms.killed += killed; ms.injured += injured;
-        if (flags & F.COUNTED) ms.counted++;
-        if (flags & F.BIKE) ms.bike++;
-      }
-      if (street && code) {
-        const st = (streetStats[`${code}|${street}`] ??= { all: 0, counted: 0, killed: 0, injured: 0 });
-        st.all++; st.killed += killed; st.injured += injured; if (flags & F.COUNTED) st.counted++;
-      }
-      const d = new Date(EPOCH + t * 60000);
-      hourWeek[(d.getUTCDay() + 6) % 7][d.getUTCHours()]++;
-      if (d.getUTCDate() === 13 && d.getUTCDay() === 5) fun.friday13++;
-      if (flags & F.FLED) fun.fled++;
-      if (flags & F.ANIMAL) fun.animals++;
-      if (flags & F.SCOOTER) fun.scooters++;
-      if (flags & F.BIKE) fun.bikes++;
-      if (r.ivykioVieta) topAddresses[r.ivykioVieta] = (topAddresses[r.ivykioVieta] ?? 0) + 1;
-
-      const culpritTp = new Set(people.filter((p) => p.kaltininkas === "Taip").map((p) => p.tpId));
-      vehicles.forEach((v, idx) => {
-        const mk = makes[idx];
-        if (!mk || v.kategorija !== "Keleivinis automobilis") return;
-        const s = (makeStats[mk] ??= { all: 0, culprit: 0, killed: 0, byYear: {} });
-        s.all++;
-        s.byYear[year] = (s.byYear[year] ?? 0) + 1;
-        if (culpritTp.has(v.tpId)) s.culprit++;
-        if (killed) s.killed++;
-      });
-
-      for (const p of people) {
-        if (!/vairuotojas$/.test(p.kategorija ?? "") || p.amzius == null) continue;
-        const b = ageBucket(p.amzius);
-        if (b < 0) continue;
-        ageStats[b].drivers++;
-        if (p.kaltininkas === "Taip") {
-          ageStats[b].culprits++;
-          fun.culprits++;
-          if (p.busena && p.busena !== "Blaivus") { ageStats[b].drunk++; fun.drunkCulprits++; }
-        }
-        if (p.bukle === "Žuvo") ageStats[b].killed++;
-      }
-
-      if (flags & F.BUS_STOP) {
-        fun.busStops++;
-        for (const mk of new Set(makes.filter(Boolean))) busStopMakes[mk] = (busStopMakes[mk] ?? 0) + 1;
-      }
-      if ((flags & F.BUS_STOP) && (flags & F.BMW)) {
-        const bmw = vehicles.find((v) => normMake(v.marke) === "BMW");
-        busStops.push({ date: r.dataLaikas, place: r.ivykioVieta, model: bmw?.modelis ?? null, lat: +lat.toFixed(5), lng: +lng.toFixed(5) });
-      }
-    }
-
-    if (unmatched.size) console.warn("  Nesuderintos savivaldybės:", [...unmatched]);
-    const payload = { year, n: cols.t.length, dict, ...cols };
-    await fs.writeFile(path.join(OUT, `accidents-${year}.json`), JSON.stringify(payload));
-    console.log(`  ${cols.t.length} įvykių (praleista ${skipped})`);
-  }
-
-  console.log("Regitra markės…");
-  const topMakes = Object.entries(makeStats).sort((a, b) => b[1].all - a[1].all).slice(0, 30).map(([m]) => m);
-  const registered = {};
-  for (const mk of topMakes) registered[mk] = await regitraCount(mk);
-
-  const municipalities = Object.entries(population)
-    .filter(([, p]) => Object.values(p.pop).some((n) => n > 0)) // drop abolished units (e.g. Marijampolės r.)
-    .map(([code, p]) => ({
-    code,
-    name: p.name,
-    population: p.pop,
-    years: muniStats[code] ?? {},
-  }));
-
-  const streets = Object.entries(streetStats)
-    .map(([key, v]) => {
-      const [code, street] = key.split("|");
-      return { code, street, ...v };
-    })
-    .sort((a, b) => b.counted - a.counted || b.all - a.all)
-    .slice(0, 60);
-
-  const stats = {
-    generatedAt: new Date().toISOString(),
-    years: wanted,
-    yearTotals,
-    municipalities,
-    makes: topMakes.map((m) => ({ make: m, ...makeStats[m], registered: registered[m] })),
-    ages: AGE_BUCKETS.map((b, i) => ({ label: bucketLabel(b), population: agePop[i], ...ageStats[i] })),
-    streets,
-    hourWeek,
-    busStopsBmw: busStops.sort((a, b) => (a.date < b.date ? 1 : -1)),
-    fun: {
-      ...fun,
-      busStopMakes: Object.entries(busStopMakes).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([make, n]) => ({ make, n })),
-      topAddresses: Object.entries(topAddresses).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([place, n]) => ({ place, n })),
-    },
-    sources: [
-      { name: "Policijos departamentas – Eismo įvykių duomenys (EĮIS)", url: "https://data.gov.lt/datasets/509/" },
-      { name: "Valstybės duomenų agentūra – gyventojai (SDMX API)", url: "https://osp.stat.gov.lt/rdb-rest" },
-      { name: "Valstybės duomenų agentūra – savivaldybių ribos", url: "https://osp-sdg.stat.gov.lt/arcgis/rest/services/sav_11_2_1/FeatureServer" },
-      { name: "Regitra – transporto priemonės pagal markę", url: "https://get.data.gov.lt/datasets/gov/regitra/ktpr/ValstybinisNumeris" },
-    ],
-  };
-
-  await fs.writeFile(path.join(OUT, "stats.json"), JSON.stringify(stats));
-  await fs.writeFile(
-    path.join(OUT, "municipalities.geojson"),
-    JSON.stringify({
-      type: "FeatureCollection",
-      features: boundaries.map((b) => ({ type: "Feature", properties: { code: b.code, name: b.name }, geometry: b.geometry })),
-    }),
-  );
-  console.log("Baigta →", path.relative(ROOT, OUT));
-}
-
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+const only = process.argv.slice(2);
+const want = (part) => !only.length || only.includes(part);
+if (want("lanes")) await buildLanes();
+if (want("parking")) await buildParking();
+if (want("border")) await buildBorder();
+if (want("transit")) await buildTransit();
