@@ -98,7 +98,7 @@ export function ModeMatrix({
             title={m.feasible ? m.weatherWarning : m.why}
             className={`flex min-w-[124px] shrink-0 snap-start flex-col items-start rounded-2xl bg-[var(--panel)] text-left transition lg:min-w-0 ${
               on ? "border-2 border-[var(--marking)] p-[11px] shadow-[0_4px_14px_rgba(5,150,105,0.15)]" : "border border-[var(--line)] p-3 hover:border-[#cbd5e1]"
-            } ${m.feasible ? "" : "opacity-50"}`}
+            } ${m.feasible && !m.weatherWarning ? "" : "opacity-50"}`}
           >
             <span className="flex w-full items-start justify-between gap-1">
               <ModeBadge mode={m.id} size={26} />
@@ -115,6 +115,7 @@ export function ModeMatrix({
               {" · "}
               <span style={{ color: co2.get(m.id) === "stop" ? TONE.stop.text : undefined }}>{m.co2 < 0.001 ? "0 g" : fmtCo2(m.co2)}</span>
             </span>
+            {m.weatherWarning && <span className="mt-0.5 text-[10.5px] font-semibold" style={{ color: TONE.stop.text }}>Ne dėl oro</span>}
           </button>
         );
       })}

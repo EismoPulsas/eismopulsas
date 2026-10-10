@@ -295,7 +295,9 @@ function raptor(N: Net, from: LatLng, to: LatLng, t0: number, ctx: DayCtx): Sear
     // Destination reached this round?
     let roundBest: { stop: number; arrival: number } | null = null;
     for (const [s, d] of egress) {
-      if (cur[s] === Infinity) continue;
+      // Only walk to B from where a vehicle stopped: "walk to another stop, then walk
+      // on to B" is just a longer walk, shown as two.
+      if (cur[s] === Infinity || !par[s]?.ride) continue;
       const t = cur[s] + walkSec(d);
       if (!roundBest || t < roundBest.arrival) roundBest = { stop: s, arrival: t };
     }
