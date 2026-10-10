@@ -431,3 +431,57 @@ export function planTransit(from: LatLng, to: LatLng, day: number, t0: number): 
   }
   return result;
 }
+
+const fold = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .trim();
+
+let stopIndex: { key: string; stops: number[] }[] | null = null;
+
+/** Stops whose name matches `q` (accent-insensitive), one per name, nearest first. */
+export function searchStops(q: string, near: LatLng | null, limit: number): { name: string; pos: LatLng }[] {
+  const N = load();
+  if (!stopIndex) {
+    const byName = new Map<string, number[]>();
+    N.raw.stops.name.forEach((name, i) => {
+      const k = fold(name);
+      const list = byName.get(k);
+      if (list) list.push(i);
+      else byName.set(k, [i]);
+    });
+    stopIndex = [...byName].map(([key, stops]) => ({ key, stops }));
+  }
+  const f = fold(q);
+  if (f.length < 3) return [];
+  const out: { name: string; pos: LatLng; d: number; exact: boolean }[] = [];
+  for (const { key, stops } of stopIndex) {
+    if (!(key.startsWith(f) || key.includes(` ${f}`))) continue;
+    // Same name in different towns: take the platform closest to `near`.
+    let best = stops[0];
+    let bestD = near ? haversine(near, stopPos(N, best)) : 0;
+    if (near)
+      for (const s of stops) {
+        const d = haversine(near, stopPos(N, s));
+        if (d < bestD) {
+          bestD = d;
+          best = s;
+        }
+      }
+    out.push({ name: N.raw.stops.name[best], pos: stopPos(N, best), d: bestD, exact: key === f });
+  }
+  out.sort((a, b) => Number(b.exact) - Number(a.exact) || a.d - b.d);
+  return out.slice(0, limit).map(({ name, pos }) => ({ name, pos }));
+}
+
+/** Positions of stops within `radius` m of `c` – handy street-side points. */
+export function stopsWithin(c: LatLng, radius: number): LatLng[] {
+  const N = load();
+  return N.grid
+    .near(c, radius)
+    .map((s) => stopPos(N, s))
+    .filter((p) => haversine(c, p) <= radius);
+}

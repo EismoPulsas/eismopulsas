@@ -25,6 +25,11 @@ export const WEAR_PER_KM = 0.12;
 export const TREE_KG_YEAR = 22;
 /** Weeks a year a commuter actually travels (holidays off). */
 export const WEEKS_PER_YEAR = 46;
+/** Shared e-scooter, life cycle incl. collection vans and battery swaps (ITF 2020, newer fleets). */
+export const SCOOTER_CO2_KM = 0.067;
+/** Cyclocity: first 30 min of each ride free with any pass (3-day pass 2,90 €), then ≈ 1 € per 30 min. */
+export const BIKESHARE_FREE_MIN = 30;
+export const BIKESHARE_EXTRA_PER_30 = 1;
 
 /** kg CO₂ per passenger-km, by vehicle. */
 function rideCo2(r: RideLeg): number {
@@ -62,6 +67,9 @@ export type Settings = {
   discount: 0 | 50 | 80;
   tripsPerWeek: number;
   priority: Priority;
+  /** Shared scooter price: unlock + per minute (no open tariff data, editable). */
+  scooterUnlock: number;
+  scooterPerMin: number;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -82,6 +90,8 @@ export const DEFAULT_SETTINGS: Settings = {
   discount: 0,
   tripsPerWeek: 10,
   priority: "balanced",
+  scooterUnlock: 0.5,
+  scooterPerMin: 0.15,
 };
 
 /** Charging points are shown and counted only for cars that can use them. */
@@ -90,6 +100,7 @@ export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybri
 const hasEvPermit = (s: Settings) => s.fuel === "electric" && s.evPermit;
 
 export type ModeId = "car" | "transit" | "bike" | "walk";
+export type ModeId = "car" | "transit" | "bikeshare" | "scooter" | "bike" | "walk";
 
 /** `unknown`: the price could not be worked out; `value` is then 0 and must not be shown as a price. */
 export type CostLine = { label: string; value: number; approx?: boolean; unknown?: boolean; note?: string };
@@ -370,6 +381,45 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
       co2: rides.reduce((a, r) => a + (r.distance / 1000) * rideCo2(r), 0),
       kcal: (t.walkDistance / 1000) * 55,
       feasible: true,
+    });
+  }
+
+  if (plan.bikeshare) {
+    const b = plan.bikeshare;
+    const extra = Math.max(0, Math.ceil((b.rideDuration / 60 - BIKESHARE_FREE_MIN) / 30));
+    out.push({
+      id: "bikeshare",
+      duration: b.duration,
+      distance: b.walkTo + b.ride + b.walkFrom,
+      cost: extra * BIKESHARE_EXTRA_PER_30,
+      costLines: [
+        {
+          label: b.system,
+          value: extra * BIKESHARE_EXTRA_PER_30,
+          approx: extra > 0,
+          note: extra ? `${Math.round(b.rideDuration / 60)} min, virš 30 nemokamų` : "pirmos 30 min nemokamai su bilietu (nuo 2,90 € / 3 d.)",
+        },
+      ],
+      co2: 0,
+      kcal: (b.ride / 1000) * 28 + ((b.walkTo + b.walkFrom) / 1000) * 55,
+      feasible: b.rideDuration <= 60 * 60,
+    });
+  }
+
+  if (plan.scooter) {
+    const sc = plan.scooter;
+    const minutes = Math.ceil(sc.rideDuration / 60);
+    const cost = s.scooterUnlock + minutes * s.scooterPerMin;
+    out.push({
+      id: "scooter",
+      duration: sc.duration,
+      distance: sc.distance,
+      cost,
+      costLines: [{ label: "Paspirtuko nuoma", value: cost, approx: true, note: `${s.scooterUnlock.toFixed(2)} € + ${minutes} min × ${s.scooterPerMin.toFixed(2)} €` }],
+      co2: (sc.distance / 1000) * SCOOTER_CO2_KM,
+      kcal: 0,
+      feasible: sc.rideDuration <= 45 * 60,
+      why: sc.rideDuration > 45 * 60 ? "Per toli paspirtukui" : undefined,
     });
   }
 

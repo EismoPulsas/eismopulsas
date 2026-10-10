@@ -43,7 +43,7 @@ export function ModeList({
   parking: ParkingChoiceProps;
 }) {
   const sig = { duration: signals(modes, "duration"), cost: signals(modes, "cost"), co2: signals(modes, "co2") };
-  const order: ModeId[] = ["car", "transit", "bike", "walk"];
+  const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
   const sorted = [...modes].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 
   return (
@@ -108,6 +108,9 @@ function ModeCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="font-display text-[15px] font-semibold">{meta.short}</span>
+            {m.id === "scooter" && plan.scooter?.source === "demo" && (
+              <span className="rounded bg-[#f472b6] px-1 text-[10px] font-bold text-black">DEMO</span>
+            )}
             {isBest && (
               <span className="rounded-md bg-[var(--sign-green)] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase ring-1 ring-white/80">
                 Geriausia
@@ -145,6 +148,8 @@ function Details({ plan, mode: m, parking }: { plan: PlanResponse; mode: ModeSum
     <div className="flex flex-col gap-3 border-t border-[var(--line)]/70 px-3 pt-3 pb-3.5">
       {m.id === "car" && plan.car && <CarDetails plan={plan} mode={m} parking={parking} />}
       {m.id === "transit" && plan.transit && <TransitTimeline t={plan.transit} />}
+      {m.id === "bikeshare" && plan.bikeshare && <BikeshareDetails plan={plan} kcal={m.kcal} />}
+      {m.id === "scooter" && plan.scooter && <ScooterDetails plan={plan} />}
       {(m.id === "bike" || m.id === "walk") && (
         <div className="flex flex-col gap-1.5">
           <Row label="Atstumas" value={fmtKm(m.distance)} />
@@ -179,6 +184,56 @@ function Details({ plan, mode: m, parking }: { plan: PlanResponse; mode: ModeSum
 }
 
 function CarDetails({ plan, mode, parking }: { plan: PlanResponse; mode: ModeSummary; parking: ParkingChoiceProps }) {
+function ScooterDetails({ plan }: { plan: PlanResponse }) {
+  const sc = plan.scooter!;
+  const v = sc.vehicle;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {v ? (
+        <Row
+          label={<span className="flex items-center gap-1.5"><WalkIcon size={15} /> Iki artimiausio paspirtuko{v.battery !== null ? ` (baterija ${v.battery} %)` : ""}</span>}
+          value={`${fmtKm(v.walk)} · ${Math.max(1, Math.round(v.walk / 1.25 / 60))} min`}
+        />
+      ) : (
+        <Row label="Rasti ir atrakinti paspirtuką" value="≈ 3 min" />
+      )}
+      <Row label={`Važiuoti ${fmtKm(sc.distance)}`} value={fmtDur(sc.rideDuration)} />
+      <Row label="Pastatyti" value="≈ 1 min" />
+      {sc.source === "demo" && (
+        <p className="mt-1 rounded-lg border border-[#f472b6]/50 bg-[#f472b6]/10 p-2 text-xs">
+          <b className="mr-1 rounded bg-[#f472b6] px-1 text-black">DEMO</b>
+          Paspirtuko vieta išgalvota – tai bandomieji duomenys, kol negauta prieiga prie tikro operatoriaus srauto.
+        </p>
+      )}
+      {sc.source === "estimate" && (
+        <p className="mt-1 rounded-lg bg-[var(--chip)] p-2 text-xs text-[var(--muted)]">
+          Vertinimas: Bolt ir kiti operatoriai Lietuvoje neskelbia atvirų (GBFS) duomenų, todėl nežinome, kur stovi artimiausias paspirtukas. Kainą galite pasikeisti nustatymuose.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BikeshareDetails({ plan, kcal }: { plan: PlanResponse; kcal: number }) {
+  const b = plan.bikeshare!;
+  const walk = (m: number) => Math.round((m / 1.25) / 60);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Row label={<span className="flex items-center gap-1.5"><WalkIcon size={15} /> Iki stotelės „{b.from.name}“</span>} value={`${fmtKm(b.walkTo)} · ${walk(b.walkTo)} min`} />
+      <Row label={<span className="pl-[21px]">Laisvų dviračių</span>} value={b.from.bikes ?? "?"} muted />
+      <Row label={`Važiuoti ${fmtKm(b.ride)}`} value={fmtDur(b.rideDuration)} />
+      <Row label={<span className="flex items-center gap-1.5"><WalkIcon size={15} /> Nuo stotelės „{b.to.name}“</span>} value={`${fmtKm(b.walkFrom)} · ${walk(b.walkFrom)} min`} />
+      <Row label={<span className="pl-[21px]">Laisvų vietų</span>} value={b.to.docks ?? "?"} muted />
+      <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--muted)]">
+        <span className={`signal ${b.live ? "go" : "wait"}`} />
+        {b.live ? `Gyvi Cyclocity duomenys${b.updated ? `, ${new Date(b.updated).toLocaleTimeString("lt-LT", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Kitam laikui – užimtumas gali skirtis"}
+        <span className="ml-auto">≈ {fmtNum(kcal)} kcal</span>
+      </div>
+    </div>
+  );
+}
+
+function CarDetails({ plan }: { plan: PlanResponse }) {
   const c = plan.car!;
   const park = mode.parking;
   return (

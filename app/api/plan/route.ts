@@ -14,6 +14,11 @@ import { liveLots } from "@/lib/server/live-parking";
 import { osrmRoute } from "@/lib/server/osrm";
 import { parkingNear, parkingZoneAt } from "@/lib/server/parking";
 import { routeCar } from "@/lib/server/driving";
+import { estimateScooter, planBikeshare } from "@/lib/server/micromobility";
+import { osrmRoute } from "@/lib/server/osrm";
+import { scooterFleet } from "@/lib/server/scooters";
+import { parkingZoneAt } from "@/lib/server/parking";
+import { applyTraffic } from "@/lib/server/traffic";
 import { planTransit, resolveDay, timetableInfo } from "@/lib/server/transit";
 
 const BIKE_SPEED = 16 / 3.6; // m/s
@@ -34,9 +39,14 @@ export async function GET(req: Request) {
 
   const [drive, bike, walk] = await Promise.all([
     routeCar(from, to, carDeparture(depart)),
+  const [carRoute, bike, walk, share, fleet] = await Promise.all([
+    osrmRoute("car", from, to, true),
     straight < 80_000 ? osrmRoute("bike", from, to) : null,
     straight < 25_000 ? osrmRoute("foot", from, to) : null,
+    straight < 20_000 ? planBikeshare(from, to, depart.date, depart.isNow) : { result: null, note: null },
+    scooterFleet(),
   ]);
+  const scooter = straight < 20_000 ? estimateScooter(from, to, bike, fleet) : null;
 
   let car: CarResult | null = null;
   if (drive) {
@@ -86,6 +96,9 @@ export async function GET(req: Request) {
       geometry: simplify(bike.coords, 8),
     },
     walk: walk && { distance: Math.round(walk.distance), duration: Math.round(walk.duration), geometry: simplify(walk.coords, 8) },
+    bikeshare: share.result && { ...share.result, geometry: simplify(share.result.geometry, 8) },
+    bikeshareNote: share.note,
+    scooter: scooter && { ...scooter, geometry: simplify(scooter.geometry, 8) },
     transit,
     transitNote,
     timetable: { ...timetableInfo(), shifted },
