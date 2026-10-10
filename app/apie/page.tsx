@@ -1,101 +1,170 @@
 import type { Metadata } from "next";
-import { SiteHeader } from "@/components/SiteHeader";
+import Link from "next/link";
+import { Logo } from "@/components/Logo";
+import { FARES } from "@/lib/fares";
+import { FUELS, TREE_KG_YEAR, WEAR_PER_KM, WEEKS_PER_YEAR } from "@/lib/metrics";
 
-export const metadata: Metadata = { title: "Apie / API" };
+export const metadata: Metadata = { title: "Kaip skaičiuojame" };
 
-const ENDPOINTS = [
+const SOURCES = [
   {
-    method: "GET",
-    path: "/api/accidents?year=2025&muni=13&category=bike&severity=fatal,injury",
-    text: "Oficialūs eismo įvykiai GeoJSON formatu. Parametrai: year (2021–2025), muni (savivaldybės LAU kodas, pvz. 13 – Vilniaus m.), category (all, bike, pedestrian, scooter, moto, drunk, child), severity, limit (≤ 20 000).",
+    name: "Viešojo transporto tvarkaraščiai (GTFS)",
+    who: "Lietuvos transporto saugos administracija – nacionalinis prieigos taškas",
+    url: "https://www.visimarsrutai.lt/gtfs/",
+    use: "Visų miestų, rajonų ir tarpmiestinių autobusų, troleibusų ir keltų reisai. Šiaulių miesto maršrutai – iš stops.lt.",
   },
-  { method: "GET", path: "/api/reports", text: "Visi vartotojų pažymėti pavojai su balsų skaičiumi." },
   {
-    method: "POST",
-    path: "/api/reports",
-    text: "Naujas pavojus { lat, lng, category, note? } su antrašte x-voter-id. Jei per 35 m yra tos pačios kategorijos žyma – užskaitomas balsas.",
+    name: "Vilniaus A ir A+ juostos",
+    who: "SĮ „Susisiekimo paslaugos“ (JUDU)",
+    url: "https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/A_juostos_WFL1_per%C5%BEi%C5%ABra/FeatureServer",
+    use: "Kiek autobuso kelio eina gatvėmis su A juosta – ten jis aplenkia spūstis.",
   },
-  { method: "POST", path: "/api/reports/:id/vote", text: "„Aš irgi“ – vienas balsas vienam x-voter-id." },
-  { method: "GET", path: "/api/blackspots", text: "Policijos EĮIS „juodosios dėmės“ valstybiniuose keliuose (gyvai iš maps.ird.lt)." },
-  { method: "GET", path: "/api/geocode?q=… arba ?lat=…&lng=…", text: "Adresų paieška per OpenStreetMap Nominatim (tik Lietuva)." },
-  { method: "GET", path: "/data/stats.json", text: "Visa suvestinė statistika (markės, amžius, savivaldybės, gatvės)." },
+  {
+    name: "Autobusų juostos kituose miestuose",
+    who: "OpenStreetMap bendruomenė (Overpass API)",
+    url: "https://www.openstreetmap.org/copyright",
+    use: "Kauno, Klaipėdos ir kitų miestų viešojo transporto juostos.",
+  },
+  {
+    name: "Eismo intensyvumas ir greitis",
+    who: "AB „Via Lietuva“, eismoinfo.lt",
+    url: "https://eismoinfo.lt/traffic-intensity-service",
+    use: "Gyvas vidutinis greitis kas 15 min. kelių jutikliuose – koreguoja automobilio laiką, jei išvykstate dabar.",
+  },
+  {
+    name: "Vietinės rinkliavos (parkavimo) zonos",
+    who: "Vilniaus miesto savivaldybė (vplanas) ir Klaipėdos miesto savivaldybė",
+    url: "https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer",
+    use: "Zonos ribos, kaina už valandą ir kada mokama – automobilio kainai.",
+  },
+  {
+    name: "Gatvių maršrutai",
+    who: "OSRM (FOSSGIS) pagal OpenStreetMap",
+    url: "https://routing.openstreetmap.de/",
+    use: "Automobilio, dviračio ir pėsčiųjų maršrutai bei laikas laisvu keliu.",
+  },
+  {
+    name: "Adresų paieška",
+    who: "OpenStreetMap Nominatim",
+    url: "https://nominatim.openstreetmap.org/",
+    use: "Adresai ir vietos tik Lietuvoje.",
+  },
 ];
 
-export default function AboutPage() {
+export default function About() {
   return (
     <div className="min-h-dvh">
-      <SiteHeader active="/apie" />
-      <main className="mx-auto max-w-3xl space-y-10 px-4 py-10">
+      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/90 backdrop-blur">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+          <Logo />
+          <Link href="/" className="ml-auto rounded-md bg-[var(--marking)] px-3 py-1.5 text-sm font-semibold text-black">
+            Planuoti kelionę
+          </Link>
+        </div>
+      </header>
+
+      <main className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-8">
         <section>
-          <h1 className="font-display text-3xl font-bold sm:text-4xl">Apie Eismo Pulsą</h1>
-          <p className="mt-3 text-[var(--muted)]">
-            Eismo Pulsas sujungia oficialius policijos eismo įvykių duomenis su žmonių pastebėjimais. Oficialūs duomenys
-            parodo, kur jau įvyko nelaimės; vartotojų žymos – kur jos gali įvykti. Abu sluoksnius galima žiūrėti atskirai arba
-            kartu („Mix“).
+          <h1 className="font-display text-3xl font-bold">Kaip skaičiuojame</h1>
+          <p className="mt-2 text-[var(--muted)]">
+            Eismo Pulsas palygina keturis būdus nukeliauti iš A į B – automobiliu, viešuoju transportu, dviračiu ir pėsčiomis – ir parodo, kiek laiko, pinigų ir CO₂
+            sutaupytumėte ar prarastumėte palikę automobilį namie. Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų.
           </p>
+          <div className="lane-divider mt-6" />
         </section>
 
-        <section className="space-y-3">
-          <h2 className="font-display text-xl font-semibold">Duomenų šaltiniai</h2>
-          <ul className="list-disc space-y-2 pl-5 text-sm">
+        <section className="flex flex-col gap-3">
+          <h2 className="font-display text-xl font-bold">Laikas</h2>
+          <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed">
             <li>
-              <a className="text-[var(--accent)] hover:underline" href="https://data.gov.lt/datasets/509/">
-                Policijos departamentas – eismo įvykių duomenys (EĮIS)
-              </a>
-              : kiekvienas įvykis su koordinatėmis, dalyviais, transporto priemonėmis (markė, modelis), amžiumi ir aplinkybėmis.
-              Koordinatės perskaičiuojamos iš LKS-94 į WGS-84.
+              <b>Automobilis:</b> laikas laisvu keliu (OSRM) + spūstys + kelios minutės iki automobilio ir vietos paieškai (ilgiau mokamose zonose). Jei išvykstate dabar, magistralių
+              atkarpos koreguojamos pagal gyvą Via Lietuva jutiklių greitį. Miestų gatvėse taikomas piko valandų priedas (darbo dienomis 7:00–9:30 ir 16:00–18:30): Vilniuje
+              +55 %, Kaune +40 %, Klaipėdoje +30 %, kituose miestuose mažiau. Tai vertinimas, ne matavimas.
             </li>
             <li>
-              <a className="text-[var(--accent)] hover:underline" href="https://osp.stat.gov.lt/rdb-rest">
-                Valstybės duomenų agentūra (SDMX API)
-              </a>
-              : gyventojų skaičius savivaldybėse ir pagal amžių – santykiniams rodikliams.
+              <b>Viešasis transportas:</b> tikri tvarkaraščiai. Ieškome greičiausios kelionės (RAPTOR algoritmas) su iki 4 persėdimų, ėjimu iki stotelės (≈ 4,5 km/h) ir minute
+              persėdimui. Persėdimas turi sutaupyti bent 4 min. Laikas skaičiuojamas nuo išėjimo iš namų „tiksliai laiku“ iki atvykimo.
             </li>
             <li>
-              <a className="text-[var(--accent)] hover:underline" href="https://get.data.gov.lt/datasets/gov/regitra/ktpr/ValstybinisNumeris">
-                Regitra
-              </a>
-              : išduotų valstybinių numerių skaičius pagal markę (nuo 2005 m.) – kaip registruoto parko aproksimacija.
+              <b>A juostos:</b> autobuso maršrutas sutapatinamas su A / A+ juostų gatvėmis (±15 m). Tvarkaraščiai jau įskaičiuoja, kad autobusas ten nestovi spūstyje, o
+              automobiliui toje pačioje gatvėje taikomas spūsčių priedas.
             </li>
             <li>
-              <a className="text-[var(--accent)] hover:underline" href="https://maps.ird.lt/server/rest/services/EIIS/EIIS/MapServer">
-                Policijos IRD GIS
-              </a>
-              : avaringi ruožai („juodosios dėmės“) valstybinės reikšmės keliuose, gaunami gyvai.
-            </li>
-            <li>
-              <a className="text-[var(--accent)] hover:underline" href="https://www.openstreetmap.org/copyright">
-                OpenStreetMap
-              </a>{" "}
-              ir CARTO – žemėlapio pagrindas, Nominatim – adresų paieška.
+              <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
             </li>
           </ul>
         </section>
 
-        <section className="space-y-3">
-          <h2 className="font-display text-xl font-semibold">Atviras API</h2>
-          <div className="divide-y divide-[var(--line)] rounded-2xl border border-[var(--line)] bg-[var(--panel)]">
-            {ENDPOINTS.map((e) => (
-              <div key={e.method + e.path} className="p-4">
-                <code className="text-sm break-all">
-                  <span className={`mr-2 rounded px-1.5 py-0.5 text-xs font-bold ${e.method === "GET" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-                    {e.method}
-                  </span>
-                  {e.path}
-                </code>
-                <p className="mt-1.5 text-sm text-[var(--muted)]">{e.text}</p>
-              </div>
-            ))}
-          </div>
+        <section className="flex flex-col gap-3">
+          <h2 className="font-display text-xl font-bold">Pinigai</h2>
+          <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed">
+            <li>
+              <b>Degalai:</b> atstumas × sąnaudos × kaina. Numatytieji (galite pakeisti):{" "}
+              {Object.values(FUELS)
+                .map((f) => `${f.label.toLowerCase()} ${f.consumption} ${f.unit}/100 km po ${f.price.toFixed(2)} €`)
+                .join("; ")}
+              . Kainos – LEA 2026 m. rugpjūčio vidurkiai.
+            </li>
+            <li>
+              <b>Parkavimas:</b> jei B taškas savivaldybės mokamoje zonoje, mokate už tas stovėjimo valandas, kurios patenka į mokamą laiką.
+            </li>
+            <li>
+              <b>Nusidėvėjimas</b> (pasirinktinai): {WEAR_PER_KM} €/km padangoms, servisui ir vertės kritimui.
+            </li>
+            <li>
+              <b>Bilietai:</b>{" "}
+              {Object.values(FARES)
+                .map((f) =>
+                  f.kind === "time"
+                    ? `${f.name} ${f.tiers.map(([m, p]) => `${m} min – ${p.toFixed(2)} €`).join(", ")}${f.approx ? " (apytiksliai)" : ""}`
+                    : `${f.name.toLowerCase()} ≈ ${f.perKm} €/km (min. ${f.min.toFixed(2)} €)`,
+                )
+                .join("; ")}
+              . Persėdimai tame pačiame mieste galioja vienu laiko bilietu. Pasirinkus 30 d. bilietą, jo kaina padalijama iš jūsų kelionių per mėnesį.
+            </li>
+          </ul>
         </section>
 
-        <section className="space-y-2 text-sm text-[var(--muted)]">
-          <h2 className="font-display text-xl font-semibold text-[var(--ink)]">Apribojimai</h2>
-          <p>
-            Policijos rinkinys atnaujinamas kartą per metus (praėjusių metų duomenys skelbiami vasarą). Kai kurie įvykiai neturi
-            koordinačių ir žemėlapyje nerodomi. Gatvių pavadinimai registre ne visada vienodi, todėl gatvės statistika yra
-            apytikslė.
+        <section className="flex flex-col gap-3">
+          <h2 className="font-display text-xl font-bold">CO₂ ir medžiai</h2>
+          <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed">
+            <li>
+              <b>Automobilis:</b> sudegintas kuras × emisijos koeficientas ({Object.values(FUELS).map((f) => `${f.label.toLowerCase()} ${f.co2} kg/${f.unit}`).join(", ")}).
+            </li>
+            <li>
+              <b>Viešasis transportas</b> vienam keleiviui: miesto autobusas ≈ 75 g/km, troleibusas ≈ 20 g/km, tarpmiestinis autobusas ≈ 35 g/km, keltas ≈ 120 g/km.
+            </li>
+            <li>
+              <b>Medžiai:</b> vienas suaugęs medis per metus sugeria ≈ {TREE_KG_YEAR} kg CO₂. Metiniai skaičiai = vienos kelionės skirtumas × jūsų kelionės per savaitę ×{" "}
+              {WEEKS_PER_YEAR} savaitės.
+            </li>
+          </ul>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="font-display text-xl font-bold">Duomenų šaltiniai</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {SOURCES.map((s) => (
+              <a key={s.name} href={s.url} target="_blank" rel="noreferrer" className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4 hover:border-[var(--marking)]">
+                <div className="font-semibold">{s.name}</div>
+                <div className="text-xs text-[var(--marking)]">{s.who}</div>
+                <p className="mt-1.5 text-sm text-[var(--muted)]">{s.use}</p>
+              </a>
+            ))}
+          </div>
+          <p className="text-xs text-[var(--muted)]">
+            Duomenys atnaujinami komanda <code className="rounded bg-[var(--chip)] px-1">npm run data</code>. Gyvas eismas – kas 5 min. tiesiai iš eismoinfo.lt.
           </p>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="font-display text-xl font-bold">API</h2>
+          <p className="text-sm text-[var(--muted)]">Tą patį palyginimą galima gauti JSON formatu:</p>
+          <pre className="overflow-x-auto rounded-xl bg-[var(--chip)] p-3 text-xs">
+            {`GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876&depart=2026-10-12T08:00
+GET /api/traffic          # gyvi Via Lietuva jutikliai
+GET /api/geocode?q=Gedimino pr. 9, Vilnius`}
+          </pre>
         </section>
       </main>
     </div>

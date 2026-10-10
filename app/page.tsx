@@ -1,9 +1,5 @@
-import MapLoader from "@/components/MapLoader";
+import Planner from "@/components/planner/Planner";
 
 export default function Home() {
-  return (
-    <main className="h-dvh w-full">
-      <MapLoader />
-    </main>
-  );
+  return <Planner />;
 }
