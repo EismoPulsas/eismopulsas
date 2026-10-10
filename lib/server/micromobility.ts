@@ -108,12 +108,13 @@ const SCOOTER_TOWNS: { name: string; c: LatLng; r: number }[] = [
   { name: "Druskininkai", c: [54.0167, 23.9667], r: 4000 },
 ];
 
-export async function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet): Promise<ScooterResult | null> {
+/** `maxWalk`: the farthest (straight-line metres) a known scooter may be from `from`. */
+export async function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet, maxWalk = 600): Promise<ScooterResult | null> {
   if (!bike) return null;
 
   if (fleet.source !== "none") {
     // Known fleet: walk to the nearest free scooter, unlock (30 s), ride from there, park (1 min).
-    const v = nearestScooter(fleet, from);
+    const v = nearestScooter(fleet, from, maxWalk);
     if (!v) return null;
     const [walk, ride] = await Promise.all([walkPath(from, v.pos), v.distance > 100 ? bikeRoute(v.pos, to) : bike]);
     const r = ride ?? bike;

@@ -1,12 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fmtStay, isEv, lotCost, zoneCost, type Settings } from "@/lib/metrics";
+import { evalParkingAt, fmtStay, isEv, zoneCost, zonePaidAt, type Settings } from "@/lib/metrics";
 import type { Charger, ChargerPlug, Connector, Lot, OccupancyProfile } from "@/lib/plan-types";
 import { fmtEur } from "./format";
 import type { LiveParking } from "./live";
 import type { LatLng } from "@/lib/geo";
-import { bikeStatus, KIND_LABEL, LOT_CLASS, lotClass, NO_PARKING, SOURCE_LABEL, speedStatus, STATUS, ZONE_COLOR, type BikeStation, type MapPick, type Sensor } from "./parking-meta";
+import {
+  bikeStatus,
+  FREE_STREET,
+  KIND_LABEL,
+  LOT_CLASS,
+  lotClass,
+  NO_PARKING,
+  slotOf,
+  SOURCE_LABEL,
+  speedStatus,
+  STATUS,
+  whenLabel,
+  ZONE_COLOR,
+  type BikeStation,
+  type MapPick,
+  type Sensor,
+  type When,
+} from "./parking-meta";
 
 type OccupancyFile = { weeks: number; from: string; to: string; lots: Record<string, OccupancyProfile> };
 
@@ -24,17 +41,6 @@ function useFile<T>(url: string, enabled: boolean): T | null {
     };
   }, [url, enabled, data]);
   return data;
-}
-
-/** Now in Lithuania: date, seconds since midnight, weekday (0 = Monday). */
-function vilniusNow() {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-      .formatToParts(new Date())
-      .map((x) => [x.type, x.value]),
-  );
-  const date = `${p.year}-${p.month}-${p.day}`;
-  return { date, sec: +p.hour * 3600 + +p.minute * 60, weekday: (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7 };
 }
 
 const PLUG: Record<Connector, string> = { T2: "Type 2", CCS: "CCS", CHADEMO: "CHAdeMO", T1: "Type 1", SCHUKO: "Buitinis", OTHER: "Kita" };
@@ -89,12 +95,13 @@ const GLYPH = {
   ),
 };
 
-function header(pick: MapPick): { color: string; glyph: React.ReactNode; square?: boolean } {
+function header(pick: MapPick, when: When): { color: string; glyph: React.ReactNode; square?: boolean } {
   switch (pick.type) {
     case "lot":
-      return { color: LOT_CLASS[lotClass(pick.lot)].color, glyph: GLYPH.P, square: true };
+      return { color: LOT_CLASS[lotClass(pick.lot, when)].color, glyph: GLYPH.P, square: true };
     case "street":
-      return { color: (pick.zone && ZONE_COLOR[pick.zone.zone]) || (pick.fee === "yes" ? LOT_CLASS.paid.color : STATUS.go), glyph: GLYPH.P, square: true };
+      if (pick.zone) return { color: zonePaidAt(pick.zone, when.date, when.sec) ? (ZONE_COLOR[pick.zone.zone] ?? "#999") : FREE_STREET, glyph: GLYPH.P, square: true };
+      return { color: pick.fee === "yes" ? LOT_CLASS.paid.color : STATUS.go, glyph: GLYPH.P, square: true };
     case "noparking":
       return { color: NO_PARKING, glyph: GLYPH.no };
     case "charger":
@@ -188,12 +195,12 @@ function Source({ children }: { children: React.ReactNode }) {
   return <p className="border-t border-[var(--line)] pt-2 text-[11px] leading-relaxed text-[var(--muted)]">{children}</p>;
 }
 
-/** "Your stay now": what the profile's usual stay would cost if you parked right now. */
-function StayCost({ cost, hours, note }: { cost: number | null; hours: number; note?: string }) {
+/** "Your stay": what the usual stay would cost when parking at the planned moment. */
+function StayCost({ cost, hours, note, when }: { cost: number | null; hours: number; note?: string; when: When }) {
   return (
     <div className="flex items-baseline justify-between gap-3 rounded-lg bg-[var(--chip)] px-2.5 py-1.5 text-sm">
       <span>
-        {fmtStay(hours * 60)} nuo dabar
+        {fmtStay(hours * 60)} nuo {when.isNow ? "dabar" : whenLabel(when)}
         {note && <span className="text-xs text-[var(--muted)]"> · {note}</span>}
       </span>
       <b className="tnum shrink-0">{cost == null ? "nežinoma" : cost === 0 ? "0 €" : fmtEur(cost)}</b>
@@ -202,8 +209,22 @@ function StayCost({ cost, hours, note }: { cost: number | null; hours: number; n
 }
 
 /** One card for anything clicked on the map: car park, street piece, charger, Cyclocity station, road sensor. */
-export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: MapPick; live: LiveParking | null; settings: Settings; onClose: () => void; onGo?: (p: LatLng) => void }) {
-  const now = vilniusNow();
+export function ParkingCard({
+  pick,
+  live,
+  settings,
+  when,
+  onClose,
+  onGo,
+}: {
+  pick: MapPick;
+  live: LiveParking | null;
+  settings: Settings;
+  /** Prices and the occupancy chart are for this moment (the trip's arrival, or now). */
+  when: When;
+  onClose: () => void;
+  onGo?: (p: LatLng) => void;
+}) {
   const title =
     pick.type === "lot"
       ? (pick.lot.name ?? (pick.lot.near ? `Aikštelė prie „${pick.lot.near}“` : "Automobilių stovėjimo aikštelė"))
@@ -216,13 +237,13 @@ export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: Map
             : pick.type === "bikeshare"
               ? pick.station.name
               : pick.sensor.name;
-  const icon = header(pick);
+  const icon = header(pick, when);
   const pos = pickPos(pick);
   return (
     <div
       role="dialog"
       aria-label={title}
-      className="pointer-events-auto absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--panel)] shadow-[0_20px_50px_rgba(15,23,42,0.2)] sm:w-[360px]"
+      className="pointer-events-auto absolute top-0 left-0 z-[600] flex max-h-full w-full flex-col overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--panel)] shadow-[0_20px_50px_rgba(15,23,42,0.2)] sm:w-[360px]"
     >
       <div className="flex items-start gap-3 p-3.5 pb-2.5">
         <PlaceIcon {...icon} />
@@ -241,8 +262,8 @@ export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: Map
         </button>
       </div>
       <div className="flex flex-col gap-2.5 overflow-y-auto px-3 pb-3">
-        {pick.type === "lot" && <LotBody lot={pick.lot} live={live} settings={settings} now={now} />}
-        {pick.type === "street" && <StreetBody pick={pick} settings={settings} now={now} />}
+        {pick.type === "lot" && <LotBody lot={pick.lot} live={live} settings={settings} when={when} />}
+        {pick.type === "street" && <StreetBody pick={pick} settings={settings} when={when} />}
         {pick.type === "noparking" && (
           <>
             <p className="text-sm">
@@ -270,16 +291,17 @@ export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: Map
   );
 }
 
-function LotBody({ lot, live, settings, now }: { lot: Lot; live: LiveParking | null; settings: Settings; now: ReturnType<typeof vilniusNow> }) {
+function LotBody({ lot, live, settings, when }: { lot: Lot; live: LiveParking | null; settings: Settings; when: When }) {
   const occ = useFile<OccupancyFile>("/data/lot-occupancy.json", !!lot.occ);
   const ev = isEv(settings);
   const chargers = useFile<{ chargers: Charger[] }>("/data/chargers.json", ev);
-  const cls = LOT_CLASS[lotClass(lot)];
+  const cls = LOT_CLASS[lotClass(lot, when)];
   const liveNow = lot.occ ? live?.lots?.[lot.occ] : undefined;
   const profile = lot.occ ? occ?.lots[lot.occ] : undefined;
   const here = chargers?.chargers.filter((c) => c.lotId === lot.id) ?? [];
-  const cost = lotCost(lot.t, now.date, now.sec, settings.parkingHours);
-  const evFree = settings.fuel === "electric" && settings.evPermit && lot.src === "judu" && !lot.gated && lot.t.known && !lot.t.flat;
+  // The same estimate as the planner's (zone price, JUDU EV permit…), for the usual stay.
+  const stay = evalParkingAt({ kind: "lot", id: lot.id, name: "", pos: lot.pos, walk: 0, lot }, when.date, when.sec, settings);
+  const [weekday, hour] = slotOf(when);
 
   return (
     <>
@@ -311,12 +333,13 @@ function LotBody({ lot, live, settings, now }: { lot: Lot; live: LiveParking | n
           ))}
         </ul>
         {lot.t.monthly != null && <p className="text-xs text-[var(--muted)]">Mėnesinis abonementas nuo {fmtEur(lot.t.monthly)}</p>}
-        <StayCost cost={evFree ? 0 : cost} hours={settings.parkingHours} note={evFree ? "su JUDU elektromobilio leidimu" : lot.t.assumed} />
+        {lot.t.assumed && <p className="text-xs text-[var(--muted)]">{lot.t.assumed}</p>}
+        <StayCost cost={stay.cost} hours={settings.parkingHours} note={stay.costNote.startsWith("nemokama su") ? stay.costNote : undefined} when={when} />
       </Section>
 
       {profile && (
         <Section title="Kada lengviausia rasti vietą">
-          <OccupancyChart profile={profile} weekday={now.weekday} hour={Math.floor(now.sec / 3600)} />
+          <OccupancyChart key={`${weekday}-${hour}`} profile={profile} weekday={weekday} hour={hour} />
           {occ && (
             <p className="text-[11px] text-[var(--muted)]">
               Pagal JUDU užtvarų duomenis kas 30 s, {occ.weeks} sav. ({occ.from} – {occ.to}). „Vietą rasite“ – dalis dienų, kai tą valandą visą laiką buvo bent viena laisva vieta.
@@ -349,9 +372,10 @@ function LotBody({ lot, live, settings, now }: { lot: Lot; live: LiveParking | n
   );
 }
 
-function StreetBody({ pick, settings, now }: { pick: Extract<MapPick, { type: "street" }>; settings: Settings; now: ReturnType<typeof vilniusNow> }) {
+function StreetBody({ pick, settings, when }: { pick: Extract<MapPick, { type: "street" }>; settings: Settings; when: When }) {
   const z = pick.zone;
-  const zc = z ? zoneCost(z, now.date, now.sec, settings.parkingHours, settings) : null;
+  const zc = z ? zoneCost(z, when.date, when.sec, settings.parkingHours, settings) : null;
+  const paidNow = z ? zonePaidAt(z, when.date, when.sec) : false;
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
@@ -370,7 +394,10 @@ function StreetBody({ pick, settings, now }: { pick: Extract<MapPick, { type: "s
         {z ? (
           <>
             <p className="text-sm">{z.text}</p>
-            <StayCost cost={zc!.cost} hours={settings.parkingHours} note={zc!.note} />
+            <p className="text-sm font-semibold">
+              {when.isNow ? "Dabar" : whenLabel(when)} – {paidNow ? "mokama" : "nemokama"}
+            </p>
+            <StayCost cost={zc!.cost} hours={settings.parkingHours} note={zc!.note} when={when} />
           </>
         ) : pick.fee === "yes" ? (
           <p className="text-sm">Mokama (pagal OpenStreetMap), kaina nežinoma.</p>

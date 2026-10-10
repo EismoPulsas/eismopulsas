@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Grid, haversine, inPolygon, type LatLng } from "../geo";
 import type { Charger, Connector, LiveLot, Lot, OccupancyProfile, ParkingOption, ParkingZone } from "../plan-types";
-import { lotCost } from "../metrics";
+import { lotCost, zoneLot } from "../metrics";
 
 // Where a car can be left near B: municipal zones, street-side parking, car parks and
 // (for EV drivers) charging points, from the files scripts/build-parking.mjs writes.
@@ -49,11 +49,24 @@ type Data = {
 };
 let data: Data | null = null;
 
+function zoneOf({ city, zone, price, firstHour, text, rules }: Zone): ParkingZone {
+  return { city, zone, price, firstHour, text, rules };
+}
+
+/** The zone at p among `zones`: where zones overlap, the dearest one applies at the exact spot. */
+const zoneAmong = (zones: Zone[], p: LatLng) => zones.filter((z) => z.poly.some((rings) => inPolygon(p, rings))).sort((a, b) => b.price - a.price)[0] ?? null;
+
 function load(): Data {
   if (data) return data;
   const parking = read<{ zones: Zone[]; areas?: Area[] }>("parking.json");
+  const zones = parking?.zones ?? [];
   const lots = new Grid<Lot>(0.005);
-  for (const file of ["lots.json", "lots-lt.json"]) for (const l of read<{ lots: Lot[] }>(file)?.lots ?? []) lots.add(l.pos, l);
+  for (const file of ["lots.json", "lots-lt.json"])
+    for (const l of read<{ lots: Lot[] }>(file)?.lots ?? []) {
+      // Only volunteer-tagged free car parks can turn out to be in a paid zone (see zoneLot).
+      const z = l.src === "osm" && l.t.free ? zoneAmong(zones, l.pos) : null;
+      lots.add(l.pos, zoneLot(l, z && zoneOf(z)));
+    }
 
   const street = new Grid<StreetSpot>(0.005);
   const s = read<StreetFile>("street-parking.json");
@@ -72,7 +85,7 @@ function load(): Data {
   }
 
   data = {
-    zones: parking?.zones ?? [],
+    zones,
     areas: parking?.areas ?? [],
     lots,
     street,
@@ -83,16 +96,37 @@ function load(): Data {
   return data;
 }
 
-const zoneOf = ({ city, zone, price, firstHour, text, rules }: Zone): ParkingZone => ({ city, zone, price, firstHour, text, rules });
-
 /** The municipal paid-parking zone at p, if any (Vilnius, Klaipėda). */
 export function parkingZoneAt(p: LatLng): ParkingZone | null {
-  // Overlapping zones: the dearest one applies at the exact spot.
-  const hits = load()
-    .zones.filter((z) => z.poly.some((rings) => inPolygon(p, rings)))
-    .sort((a, b) => b.price - a.price);
-  return hits.length ? zoneOf(hits[0]) : null;
+  const z = zoneAmong(load().zones, p);
+  return z && zoneOf(z);
 }
+
+/**
+ * Town centres with paid street parking whose zones are not published as open data (only
+ * Vilnius and Klaipėda do): a street there is never assumed free, its price is unknown.
+ * Rough centres and radii of the paid areas.
+ */
+const UNPRICED_TOWNS: { name: string; c: LatLng; r: number }[] = [
+  { name: "Kaunas", c: [54.898, 23.908], r: 2500 },
+  { name: "Šiauliai", c: [55.9333, 23.3144], r: 1200 },
+  { name: "Panevėžys", c: [55.7339, 24.3575], r: 1200 },
+  { name: "Alytus", c: [54.3964, 24.0459], r: 900 },
+  { name: "Marijampolė", c: [54.5594, 23.354], r: 800 },
+  { name: "Palanga", c: [55.9175, 21.0686], r: 2000 },
+  { name: "Druskininkai", c: [54.0167, 23.9715], r: 1500 },
+  { name: "Trakai", c: [54.6378, 24.9343], r: 1500 },
+  { name: "Birštonas", c: [54.608, 24.0284], r: 900 },
+  { name: "Nida", c: [55.304, 21.0045], r: 1200 },
+  { name: "Utena", c: [55.4979, 25.5994], r: 700 },
+  { name: "Kėdainiai", c: [55.2885, 23.9744], r: 700 },
+  { name: "Telšiai", c: [55.985, 22.2475], r: 700 },
+  { name: "Tauragė", c: [55.2522, 22.2897], r: 700 },
+  { name: "Mažeikiai", c: [56.3105, 22.3383], r: 700 },
+  { name: "Ukmergė", c: [55.2456, 24.7608], r: 600 },
+  { name: "Jonava", c: [55.0727, 24.2797], r: 600 },
+];
+export const unpricedZoneAt = (p: LatLng) => UNPRICED_TOWNS.some((t) => haversine(p, t.c) <= t.r);
 
 /** Walking metres: straight line × 1.3 for streets and crossings. */
 const walkTo = (to: LatLng, pts: LatLng[]) => Math.round(Math.min(...pts.map((p) => haversine(p, to))) * 1.3);
@@ -136,14 +170,15 @@ export function parkingNear(to: LatLng, date: string, arriveSec: number, live: R
 
   // 1. The street at B itself (what the planner always assumed).
   const zoneHere = parkingZoneAt(to);
-  out.push({ kind: "zone", id: "zone", name: zoneHere ? `Gatvėje prie tikslo, ${zoneHere.zone.toLowerCase()}` : "Gatvėje prie tikslo", pos: to, walk: 0, zone: zoneHere });
+  out.push({ kind: "zone", id: "zone", name: zoneHere ? `Gatvėje prie tikslo, ${zoneHere.zone.toLowerCase()}` : "Gatvėje prie tikslo", pos: to, walk: 0, zone: zoneHere, zoneUnknown: (!zoneHere && unpricedZoneAt(to)) || undefined });
 
   // 2. Mapped street-side parking: the nearest, and the nearest free one if different.
   const spots = [...new Set(d.street.near(to, radius))]
     .map((s) => ({ s, walk: walkTo(to, s.pts) }))
     .filter((x) => x.walk <= maxWalk)
     .sort((a, b) => a.walk - b.walk);
-  const isFree = (s: StreetSpot) => s.zi === undefined && s.fee !== "yes";
+  const unpriced = (s: StreetSpot) => s.zi === undefined && unpricedZoneAt(s.pts[0]);
+  const isFree = (s: StreetSpot) => s.zi === undefined && (s.fee === "no" || (s.fee !== "yes" && !unpriced(s)));
   const picks = [spots[0], spots.find((x) => isFree(x.s))].filter((x): x is NonNullable<typeof x> => x !== undefined).filter((x, i, a) => a.indexOf(x) === i);
   for (const { s, walk } of picks) {
     const area = s.ai !== undefined ? d.areas[s.ai] : undefined;
@@ -155,6 +190,7 @@ export function parkingNear(to: LatLng, date: string, arriveSec: number, live: R
       walk,
       zone: s.zi !== undefined ? zoneOf(d.zones[s.zi]) : null,
       fee: s.fee ?? null,
+      zoneUnknown: unpriced(s) || undefined,
       maxStayMin: s.maxStayMin,
       streetOccupancy: area?.occupancy ?? null,
       curb: s.curb || undefined,
@@ -174,14 +210,15 @@ export function parkingNear(to: LatLng, date: string, arriveSec: number, live: R
     out.push(o);
   }
 
-  // 4. Charging points not inside a listed car park (only offered to EV drivers, see metrics).
+  // 4. Charging points not inside a listed car park (only offered to EV drivers, see metrics);
+  //    on the street the zone's price applies, as at a hub.
   const chargers = [...new Set(d.chargers.near(to, radius))]
     .filter((c) => !inLot.has(c.id))
     .map((c) => ({ c, walk: walkTo(to, [c.pos]) }))
     .filter((x) => x.walk <= maxWalk)
     .sort((a, b) => a.walk - b.walk)
     .slice(0, 4);
-  for (const { c, walk } of chargers) out.push({ kind: "charger", id: `charger-${c.id}`, name: c.name, pos: c.pos, walk, chargers: [c] });
+  for (const { c, walk } of chargers) out.push({ kind: "charger", id: `charger-${c.id}`, name: c.name, pos: c.pos, walk, chargers: [c], zone: parkingZoneAt(c.pos) });
 
   return out.sort((a, b) => a.walk - b.walk);
 }
@@ -226,12 +263,12 @@ export function hubsAround(
     .filter((x, i) => i < 80 || x.l.access === "pr" || !!x.l.t.flat);
   for (const { l } of lots) out.push(lotOption(d, l, 0, [wd, hour], live));
 
-  // Street parking that is free or in a cheap zone (≤ 1 €/h).
+  // Street parking that is free or in a cheap zone (≤ 1 €/h); never in a town centre whose prices we lack.
   const seen = new Set<StreetSpot>();
   const spots = d.street
     .near(to, opts.maxDist)
     .filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
-    .filter((s) => (s.zi === undefined ? s.fee !== "yes" : d.zones[s.zi].price <= 1) && (s.maxStayMin ?? Infinity) >= opts.stayHours * 60)
+    .filter((s) => (s.zi === undefined ? s.fee === "no" || (s.fee !== "yes" && !unpricedZoneAt(s.pts[0])) : d.zones[s.zi].price <= 1) && (s.maxStayMin ?? Infinity) >= opts.stayHours * 60)
     .map((s) => ({ s, pos: s.pts[Math.floor(s.pts.length / 2)] }))
     .filter((x) => onTheWay(x.pos, 1.35))
     .sort((a, b) => Number(a.s.zi !== undefined) - Number(b.s.zi !== undefined) || haversine(a.pos, to) - haversine(b.pos, to))

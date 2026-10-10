@@ -7,12 +7,31 @@ import { CircleMarker, MapContainer, ZoomControl, Marker, Polygon, Polyline, Pop
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
-import { haversine, inRing, LT_BOUNDS, type LatLng } from "@/lib/geo";
-import type { OptionId } from "@/lib/metrics";
-import type { Charger, Connector, HybridOption, Lot, PlanResponse, RideLeg, TransitLeg } from "@/lib/plan-types";
+import { haversine, inPolygon, inRing, LT_BOUNDS, type LatLng } from "@/lib/geo";
+import { zoneLot, zonePaidAt, type OptionId } from "@/lib/metrics";
+import type { Charger, Connector, HybridOption, Lot, OccupancyProfile, ParkingZone, PlanResponse, RideLeg, TransitLeg } from "@/lib/plan-types";
 import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
-import { bikeStatus, FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, speedStatus, STATUS, ZONE_COLOR, type Area, type BikeStation, type MapPick, type Sensor, type Zone } from "./parking-meta";
+import {
+  bikeStatus,
+  FREE_STREET,
+  LOT_CLASS,
+  lotClass,
+  lotLabel,
+  NO_PARKING,
+  slotOf,
+  speedStatus,
+  STATUS,
+  whenLabel,
+  ZONE_COLOR,
+  type Area,
+  type BikeStation,
+  type MapPick,
+  type Sensor,
+  type When,
+  type Zone,
+} from "./parking-meta";
+import { WeatherChip } from "./Weather";
 
 export type Layers = { lanes: boolean; traffic: boolean; parking: boolean; charging: boolean; bikeshare: boolean; scooters: boolean; stops: boolean };
 /** What covers the map: the phone search card and sheet, or the desktop panel on the left. */
@@ -65,14 +84,12 @@ function mk(color: string, glyph: string, label?: string | number | null, cls = 
 }
 const SPOT = mk("var(--marking)", "P", null, "sq chosen").icon;
 
-/** Price for the first hour as a plate label, when the rules are simple enough to say in one number. */
-function lotLabel(l: Lot): string | null {
-  const t = l.t;
-  if (!t.known) return null;
-  if (t.free) return "0 €";
-  if (t.flat) return `${t.flat.price.toLocaleString("lt-LT")} €`;
-  const h = t.tiers?.[0]?.perHour ?? t.rates?.[0]?.perHour;
-  return h != null ? `${h.toLocaleString("lt-LT", { maximumFractionDigits: 2 })} €/h` : null;
+/** The paid zone at p (the dearest where zones overlap), without its outline. */
+function zoneAt(zones: Zone[], p: LatLng): ParkingZone | null {
+  const hit = zones.filter((z) => z.poly.some((rings) => inPolygon(p, rings))).sort((a, b) => b.price - a.price)[0];
+  if (!hit) return null;
+  const { city, zone, price, firstHour, text, rules } = hit;
+  return { city, zone, price, firstHour, text, rules };
 }
 
 /** With a trip, each layer shows only where it matters (unless the user asks for the whole city):
@@ -491,6 +508,7 @@ export default function MapView({
   connectors,
   parkingSpot,
   picked,
+  when,
   padding,
   onLayers,
   onPick,
@@ -513,6 +531,8 @@ export default function MapView({
   /** Where the car option leaves the car (drawn with the walk to B). */
   parkingSpot: { pos: LatLng; name: string } | null;
   picked: MapPick | null;
+  /** Prices and spaces on the map are for this moment. */
+  when: When;
   padding: Padding;
   onLayers: (l: Layers) => void;
   onPick: (p: LatLng) => void;
@@ -572,18 +592,29 @@ export default function MapView({
   // The rest of Lithuania's car parks (OSM) load only when looking at somewhere else up close.
   const elsewhere = !!view && zoom >= 11 && !VILNIUS.contains(view.bounds.getCenter());
   const lotsLt = useJson<{ lots: Lot[] }>("/data/lots-lt.json", layers.parking && elsewhere);
+  // Typical free spaces at another time than now (live counts only say how it is now).
+  const occupancy = useJson<{ lots: Record<string, OccupancyProfile> }>("/data/lot-occupancy.json", layers.parking && !when.isNow);
   const inView = (p: LatLng) => !view || view.bounds.contains(p);
   const zoneOf = (i?: number) => (i !== undefined ? (parking?.zones[i] ?? null) : null);
   const areaOf = (i?: number) => (i !== undefined ? (parking?.areas[i] ?? null) : null);
-  const streetColor = (zi?: number, fee?: string | null) => (zi !== undefined ? (ZONE_COLOR[parking?.zones[zi]?.zone ?? ""] ?? "#999") : fee === "yes" ? LOT_CLASS.paid.color : FREE_STREET);
+  // A zone's streets in its colour only while it charges; in the evening or at the weekend they are free.
+  const streetColor = (zi?: number, fee?: string | null) => {
+    const z = zoneOf(zi);
+    if (z) return zonePaidAt(z, when.date, when.sec) ? (ZONE_COLOR[z.zone] ?? "#999") : FREE_STREET;
+    return zi === undefined && fee === "yes" ? LOT_CLASS.paid.color : FREE_STREET;
+  };
   const quiet = { bubblingMouseEvents: false };
 
+  // Car parks tagged free in OpenStreetMap but inside a paid zone take the zone's price, as on
+  // the server; until the zones are in, nothing is drawn rather than a wrong "0 €".
+  const allLots = useMemo(() => {
+    if (!parking) return [];
+    const fix = (ls: Lot[] = []) => ls.map((l) => (l.src === "osm" && l.t.free ? zoneLot(l, zoneAt(parking.zones, l.pos)) : l));
+    return [...fix(lotsFile?.lots), ...fix(lotsLt?.lots)];
+  }, [parking, lotsFile, lotsLt]);
   const visibleLots = useMemo(
-    () =>
-      layers.parking
-        ? [...(lotsFile?.lots ?? []), ...(lotsLt?.lots ?? [])].filter((l) => lotVisible(l, zoom) && (!view || view.bounds.contains(l.pos)) && nearDest(l.pos))
-        : [],
-    [layers.parking, lotsFile, lotsLt, zoom, view, nearDest],
+    () => (layers.parking ? allLots.filter((l) => lotVisible(l, zoom) && (!view || view.bounds.contains(l.pos)) && nearDest(l.pos)) : []),
+    [layers.parking, allLots, zoom, view, nearDest],
   );
   const visibleChargers = useMemo(
     () =>
@@ -596,16 +627,19 @@ export default function MapView({
   // Car parks, chargers, Cyclocity and road sensors share one marker layer, so they never pile up.
   const pois = useMemo(() => {
     const out: Poi[] = [];
+    const [wd, hour] = slotOf(when);
     for (const l of visibleLots) {
-      const color = LOT_CLASS[lotClass(l)].color;
-      const free = l.occ ? (live?.lots?.[l.occ]?.vacant ?? null) : null;
+      const color = LOT_CLASS[lotClass(l, when)].color;
+      // Free spaces: live now, or the usual count at that weekday and hour.
+      const typical = !when.isNow && l.occ ? occupancy?.lots[l.occ]?.free[wd][hour] : null;
+      const free = when.isNow ? (l.occ ? (live?.lots?.[l.occ]?.vacant ?? null) : null) : typical != null ? `~${typical}` : null;
       const plate = (l.src === "judu" && zoom >= 13) || (zoom >= 15 && (l.t.known || (l.cap ?? 0) >= 50));
       out.push({
         key: `l${l.id}`,
         pos: l.pos,
         color,
         rank: (free != null ? 60 : l.src === "judu" ? 50 : l.t.known ? 30 : 10) + Math.min(9, (l.cap ?? 0) / 50),
-        mark: plate ? mk(color, "P", free ?? lotLabel(l), "sq") : null,
+        mark: plate ? mk(color, "P", free ?? lotLabel(l, when), "sq") : null,
         onClick: (e) => pickPlace(e, { type: "lot", lot: l }),
       });
     }
@@ -644,7 +678,7 @@ export default function MapView({
     return out;
     // pickPlace only wraps onPickPlace
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleLots, visibleChargers, live, connectors, zoom, layers.bikeshare, layers.traffic, bikeshare, traffic, near]);
+  }, [visibleLots, visibleChargers, live, occupancy, when, connectors, zoom, layers.bikeshare, layers.traffic, bikeshare, traffic, near]);
 
   const bounds = L.latLngBounds(LT_BOUNDS).pad(0.15);
   const [theme, setTheme] = useState<MapTheme>(savedTheme);
@@ -707,6 +741,9 @@ export default function MapView({
                     {z.city}: {z.zone}
                   </b>
                   <div className="text-xs opacity-80">{z.text}</div>
+                  <div className="text-xs font-semibold">
+                    {when.isNow ? "Dabar" : whenLabel(when)}: {zonePaidAt(z, when.date, when.sec) ? "mokama" : "nemokama"}
+                  </div>
                 </Tooltip>
               </Polygon>
             )),
@@ -796,7 +833,7 @@ export default function MapView({
                   key={`lp${l.id}-${j}`}
                   positions={rings}
                   {...quiet}
-                  pathOptions={{ color: LOT_CLASS[lotClass(l)].color, weight: 1.5, fillOpacity: 0.12 }}
+                  pathOptions={{ color: LOT_CLASS[lotClass(l, when)].color, weight: 1.5, fillOpacity: 0.12 }}
                   eventHandlers={{ click: (e) => pickPlace(e, { type: "lot", lot: l }) }}
                 />
               )),
@@ -905,6 +942,29 @@ export default function MapView({
         )}
         {to && <Marker position={to} icon={PIN_B} draggable eventHandlers={{ dragend: (e) => onMove("to", [e.target.getLatLng().lat, e.target.getLatLng().lng]) }} />}
       </MapContainer>
+      <div
+        className="pointer-events-none absolute z-[700] grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 min-[1280px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+        style={{ top: "var(--map-overlay-top)", left: "var(--map-overlay-left)", right: "var(--map-overlay-right)" }}
+      >
+        <div className="pointer-events-auto relative z-10 col-start-1 row-start-1 min-w-0">
+          {plan?.weather && <WeatherChip key={`${plan.depart.at}:${plan.from.join(",")}`} w={plan.weather} />}
+        </div>
+        {plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging)) && (
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            className="pointer-events-auto col-span-2 col-start-1 row-start-2 flex h-10 min-w-0 items-center justify-center gap-2 justify-self-center rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur hover:bg-[var(--panel)] min-[1280px]:col-span-1 min-[1280px]:col-start-2 min-[1280px]:row-start-1"
+            aria-pressed={showAll}
+          >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${showAll ? "bg-[var(--muted)]" : "bg-[var(--marking)]"}`} />
+            <span className="hidden min-[1280px]:inline">{showAll ? "Rodomas visas miestas" : "Rodoma tik prie maršruto"}</span>
+            <span className="text-[var(--marking)]">{showAll ? "Tik prie maršruto" : "Rodyti viską"}</span>
+          </button>
+        )}
+        <div className="col-start-2 row-start-1 justify-self-end min-[1280px]:col-start-3">
+          <LayersPanel layers={layers} onChange={onLayers} ev={ev} theme={theme} onTheme={pickTheme} zoom={zoom} stations={bikeshare?.stations ?? null} when={when} />
+        </div>
+      </div>
       {layers.scooters && (scooterState.tooFar || scooterState.feed) && (
         <div
           className="pointer-events-none absolute z-[500] -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--panel)]/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur"
@@ -923,21 +983,6 @@ export default function MapView({
           )}
         </div>
       )}
-      {plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging)) && (
-        <button
-          type="button"
-          onClick={() => setShowAll(!showAll)}
-          className={`absolute z-[500] flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 py-2 text-xs font-medium whitespace-nowrap shadow-lg backdrop-blur hover:bg-[var(--panel)] ${padding.left ? "-translate-x-1/2" : "left-3"}`}
-          style={{ top: padding.top + 12, left: padding.left ? `calc(50% + ${padding.left / 2}px)` : undefined }}
-          aria-pressed={showAll}
-        >
-          <span className={`h-2 w-2 rounded-full ${showAll ? "bg-[var(--muted)]" : "bg-[var(--marking)]"}`} />
-          {/* Phones: just the action, so it fits beside the layers button. */}
-          <span className={padding.left ? "" : "hidden"}>{showAll ? "Rodomas visas miestas" : "Rodoma tik prie maršruto"}</span>
-          <span className="text-[var(--marking)]">{showAll ? "Tik prie maršruto" : "Rodyti viską"}</span>
-        </button>
-      )}
-      <LayersPanel layers={layers} onChange={onLayers} ev={ev} theme={theme} onTheme={pickTheme} zoom={zoom} top={padding.top} bottom={padding.bottom} stations={bikeshare?.stations ?? null} />
     </div>
   );
 }
@@ -968,9 +1013,8 @@ function LayersPanel({
   theme,
   onTheme,
   zoom,
-  top,
-  bottom,
   stations,
+  when,
 }: {
   layers: Layers;
   onChange: (l: Layers) => void;
@@ -978,9 +1022,8 @@ function LayersPanel({
   theme: MapTheme;
   onTheme: (t: MapTheme) => void;
   zoom: number;
-  top: number;
-  bottom: number;
   stations: BikeStation[] | null;
+  when: When;
 }) {
   const [open, setOpen] = useState(false);
   const zones: [string, string][] = [
@@ -1012,7 +1055,10 @@ function LayersPanel({
                   <Swatch key={c.label} color={c.color} label={c.label} />
                 ))}
               </div>
-              <div className="mt-1.5 text-[var(--muted)]">„P 92“ – laisvos vietos dabar, „P 1,5 €/h“ – kaina. {zoom < 15 && "Priartinkite – matysite vietas gatvėse."}</div>
+              <div className="mt-1.5 text-[var(--muted)]">
+                Kainos ir spalvos – {when.isNow ? "dabar" : whenLabel(when)}; kai zona nemokama, jos gatvės pilkos. „P {when.isNow ? "92" : "~40"}“ – laisvos vietos
+                {when.isNow ? " dabar" : " paprastai tuo metu"}, „P 1,5 €/h“ – kaina. {zoom < 15 && "Priartinkite – matysite vietas gatvėse."}
+              </div>
             </>
           ),
         },
@@ -1082,12 +1128,12 @@ function LayersPanel({
   const active = groups.flatMap((g) => g.rows).filter((r) => layers[r.id]);
 
   return (
-    <div className="absolute right-3 z-[700] flex flex-col items-end gap-2" style={{ top: top + 12, maxHeight: `calc(100% - ${top + bottom + 24}px)` }}>
+    <div className="pointer-events-auto relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)] px-3.5 py-2 text-sm font-semibold shadow-lg"
+        className="flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-sm font-semibold shadow-lg backdrop-blur"
       >
         {LAYERS_ICON}
         Sluoksniai
@@ -1100,7 +1146,10 @@ function LayersPanel({
         )}
       </button>
       {open && (
-        <div className="w-[min(320px,calc(100vw-24px))] overflow-y-auto overscroll-contain rounded-[20px] border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[0_20px_50px_rgba(15,23,42,0.2)]">
+        <div
+          className="absolute top-[var(--map-popover-offset)] right-0 w-[min(320px,calc(100vw-24px))] overflow-y-auto overscroll-contain rounded-[20px] border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[0_20px_50px_rgba(15,23,42,0.2)]"
+          style={{ maxHeight: "calc(100dvh - var(--map-overlay-top) - var(--map-popover-offset) - var(--map-overlay-bottom))" }}
+        >
           {groups.map((g) => (
             <section key={g.title} className="mb-1">
               <h3 className="eyebrow px-2 pt-2 pb-1 !text-[11px]">{g.title}</h3>

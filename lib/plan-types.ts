@@ -56,6 +56,8 @@ export type LotTariff = {
   /** An assumption the estimate relies on, shown to the user. */
   assumed?: string;
   charging?: boolean;
+  /** The municipal zone's price applies (no tariff of its own; see metrics › zoneLot). */
+  zone?: ParkingZone;
 };
 
 export type LotSource = "judu" | "unipark" | "curated" | "osm";
@@ -147,6 +149,8 @@ export type ParkingOption = {
   zone?: ParkingZone | null;
   /** Street parking: OSM fee tag outside zones ("yes"/"no"), if any. */
   fee?: string | null;
+  /** In a town centre with paid street parking we have no tariffs for: the price is unknown, never assumed free. */
+  zoneUnknown?: boolean;
   maxStayMin?: number;
   /** Street parking: how full streets in this resident area usually are, %. */
   streetOccupancy?: number | null;
@@ -234,12 +238,13 @@ export type BikeshareResult = {
 };
 
 /**
- * Shared e-scooter. With a fleet feed (real GBFS or demo) we walk to the nearest
- * scooter; otherwise it is an estimate with a typical walk to one.
+ * E-scooter. Shared: with a fleet feed (real GBFS or demo) we walk to the nearest
+ * scooter; otherwise it is an estimate with a typical walk to one. `own`: the user's
+ * own scooter, ridden from the start (or from the parked car), nothing to rent.
  */
 export type ScooterResult = {
   city: string | null;
-  source: "gbfs" | "demo" | "estimate";
+  source: "gbfs" | "demo" | "estimate" | "own";
   operator: string | null;
   /** The scooter we would take, if the fleet is known. */
   vehicle: { id: string; pos: LatLng; battery: number | null; walk: number; walkGeometry?: LatLng[] } | null;

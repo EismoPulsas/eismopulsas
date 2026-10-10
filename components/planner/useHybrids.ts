@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { isEv, type Settings } from "@/lib/metrics";
+import { hybridKinds, isEv, type Settings } from "@/lib/metrics";
 import type { HybridOption, HybridResponse, PlanResponse } from "@/lib/plan-types";
 
 /** How long the "Geriausia" badge waits for combinations before ranking without them. */
@@ -12,7 +12,8 @@ const WAIT_MS = 2500;
  * `settled`: the answer arrived, failed, timed out, or there is nothing to ask for.
  */
 export function useHybrids(plan: PlanResponse | null, s: Settings, enabled: boolean): { options: HybridOption[]; settled: boolean; note: string | null; factor: number | null } {
-  const applicable = enabled && !!plan?.car && s.hasCar && s.hybridModes.length > 0 && plan.straight >= 1500;
+  const kinds = hybridKinds(s);
+  const applicable = enabled && !!plan?.car && kinds.length > 0 && plan.straight >= 1500;
   const ev = isEv(s);
   const q = applicable && plan?.car
     ? new URLSearchParams({
@@ -22,9 +23,8 @@ export function useHybrids(plan: PlanResponse | null, s: Settings, enabled: bool
         car: String(plan.car.drive.duration),
         stay: String(s.parkingHours),
         prio: s.priority,
-        modes: s.hybridModes.join(","),
-        su: String(s.scooterUnlock),
-        sm: String(s.scooterPerMin),
+        modes: kinds.join(","),
+        ...(kinds.includes("scooter") && s.ownScooter ? { own: "1" } : { su: String(s.scooterUnlock), sm: String(s.scooterPerMin) }),
         ...(ev && s.chargeWhenParked ? { ev: "1", conn: s.connectors.join(","), ac: String(s.acKw), dc: String(s.dcKw), bat: String(s.batteryKwh) } : {}),
         ...(s.evPermit ? { permit: "1" } : {}),
       }).toString()

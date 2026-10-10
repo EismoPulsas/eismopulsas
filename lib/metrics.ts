@@ -1,5 +1,5 @@
 import { fareOf, type FareLine } from "./fares";
-import type { Charger, ChargerPlug, Connector, HybridOption, LotTariff, ParkingOption, ParkingRule, ParkingZone, PlanResponse, RideLeg, SecondKind } from "./plan-types";
+import type { Charger, ChargerPlug, Connector, HybridOption, Lot, LotTariff, ParkingOption, ParkingRule, ParkingZone, PlanResponse, RideLeg, ScooterResult, SecondKind } from "./plan-types";
 import { localSecondsAt } from "./departure";
 
 // Money, time, CO₂ and calories for each way of making the trip. Everything here
@@ -29,6 +29,14 @@ export const WET_WALK_MAX = 15 * 60;
 export const WEEKS_PER_YEAR = 46;
 /** Shared e-scooter, life cycle incl. collection vans and battery swaps (ITF 2020, newer fleets). */
 export const SCOOTER_CO2_KM = 0.067;
+/** Own e-scooter, life cycle: no collection vans, a longer life (ITF 2020). */
+export const OWN_SCOOTER_CO2_KM = 0.042;
+/** E-scooter in town: 25 km/h cap, crossings and pavements in between. */
+export const SCOOTER_SPEED = 17 / 3.6;
+/** Own scooter: unfold it at the start, fold and lock it at the end, seconds. */
+export const OWN_SCOOTER_HANDLING = 90;
+/** A walk this short is always offered: it needs no vehicle at all. */
+export const SHORT_WALK_MAX = 15 * 60;
 /** Cyclocity: first 30 min of each ride free with any pass (3-day pass 2,90 €), then ≈ 1 € per 30 min. */
 export const BIKESHARE_FREE_MIN = 30;
 export const BIKESHARE_EXTRA_PER_30 = 1;
@@ -42,6 +50,10 @@ function rideCo2(r: RideLeg): number {
 }
 
 export type Priority = "balanced" | "fast" | "cheap" | "green";
+
+/** Vehicles the user picks under A and B; walking is part of every trip and is not picked. */
+export type TravelMode = "car" | "transit" | "scooter" | "bike";
+export const TRAVEL_MODES: TravelMode[] = ["car", "transit", "scooter", "bike"];
 
 /** The user's profile (kept in the browser only). */
 export type Settings = {
@@ -72,10 +84,12 @@ export type Settings = {
   /** Shared scooter price: unlock + per minute (no open tariff data, editable). */
   scooterUnlock: number;
   scooterPerMin: number;
-  /** Car + second leg: the ways the user accepts to continue from where the car is left. */
-  hybridModes: SecondKind[];
-  /** "Mano transportas": the ways the user is willing to travel at all (and combine). */
-  travel: TravelKind[];
+  /** The vehicles the user wants to travel by: only options using nothing else are shown. */
+  travel: TravelMode[];
+  /** Rides their own e-scooter (from A, or from wherever the car is left) instead of renting one. */
+  ownScooter: boolean;
+  /** Rides their own bike instead of Cyclocity (a bike does not fit in the car: combinations stay Cyclocity). */
+  ownBike: boolean;
   /** EV: prefer leaving the car at a charger when it stands for long. */
   chargeWhenParked: boolean;
 };
@@ -100,15 +114,11 @@ export const DEFAULT_SETTINGS: Settings = {
   priority: "balanced",
   scooterUnlock: 0.5,
   scooterPerMin: 0.15,
-  hybridModes: ["transit", "bikeshare", "scooter"],
-  travel: ["car", "transit", "bike", "scooter", "walk"],
+  travel: [...TRAVEL_MODES],
+  ownScooter: false,
+  ownBike: false,
   chargeWhenParked: true,
 };
-
-export type TravelKind = "car" | "transit" | "bike" | "scooter" | "walk";
-export const TRAVEL_KINDS: TravelKind[] = ["car", "transit", "bike", "scooter", "walk"];
-/** Which "Mano transportas" choice a mode or a second leg belongs to (Cyclocity is a bike). */
-export const TRAVEL_OF: Record<ModeId | SecondKind, TravelKind> = { car: "car", transit: "transit", bikeshare: "bike", bike: "bike", scooter: "scooter", walk: "walk" };
 
 /** Charging points are shown and counted only for cars that can use them. */
 export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybrid" && s.plugIn);
@@ -116,6 +126,52 @@ export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybri
 const hasEvPermit = (s: Settings) => s.fuel === "electric" && s.evPermit;
 
 export type ModeId = "car" | "transit" | "bikeshare" | "scooter" | "bike" | "walk";
+
+/** Does the user's choice of vehicles allow making the whole trip this way? */
+export function modeAllowed(m: { id: ModeId; duration: number }, s: Settings): boolean {
+  const t = s.travel;
+  switch (m.id) {
+    case "car":
+      return s.hasCar && t.includes("car");
+    case "transit":
+      return t.includes("transit");
+    case "scooter":
+      return t.includes("scooter");
+    case "bike":
+      return t.includes("bike") && s.ownBike;
+    case "bikeshare":
+      return t.includes("bike") && !s.ownBike;
+    case "walk":
+      return m.duration <= SHORT_WALK_MAX;
+  }
+}
+
+/** How the user accepts to continue from a parked car: only with the car and that vehicle picked. */
+export function hybridKinds(s: Settings): SecondKind[] {
+  if (!s.hasCar || !s.travel.includes("car")) return [];
+  const out: SecondKind[] = [];
+  if (s.travel.includes("transit")) out.push("transit");
+  if (s.travel.includes("bike")) out.push("bikeshare");
+  if (s.travel.includes("scooter")) out.push("scooter");
+  return out;
+}
+
+/** With the user's own scooter the ride starts at A along the bike route: no walk to a vehicle, nothing to rent. */
+export function withOwnScooter(plan: PlanResponse): PlanResponse {
+  if (!plan.bike) return { ...plan, scooter: null };
+  const rideDuration = Math.round(plan.bike.distance / SCOOTER_SPEED);
+  const scooter: ScooterResult = {
+    city: null,
+    source: "own",
+    operator: null,
+    vehicle: null,
+    distance: plan.bike.distance,
+    rideDuration,
+    duration: rideDuration + OWN_SCOOTER_HANDLING,
+    geometry: plan.bike.geometry,
+  };
+  return { ...plan, scooter };
+}
 
 /** `unknown`: the price could not be worked out; `value` is then 0 and must not be shown as a price. */
 /** `info`: shown for context but not part of the trip's price (e.g. energy charged while parked). */
@@ -135,6 +191,8 @@ export type ModeSummary = {
   weatherWarning?: string;
   /** Car: where it is left at B. */
   parking?: ParkingEval | null;
+  /** Part of the price is unknown (parking without published rules): `cost` is then a lower bound. */
+  costUnknown?: boolean;
 };
 
 /** Paid parking hours in [start, start + hours] under the zone's rules. */
@@ -176,7 +234,7 @@ export function zoneCost(z: ParkingZone, date: string, start: number, hours: num
 }
 
 /** Is the moment (sec after local midnight of `date`) inside the rules? null = always. */
-function ruleAt(rules: ParkingRule[] | null | undefined, date: string, sec: number): boolean {
+export function ruleAt(rules: ParkingRule[] | null | undefined, date: string, sec: number): boolean {
   if (!rules) return true;
   const d = new Date(Date.parse(`${date}T00:00:00Z`) + Math.floor(sec / 86400) * 86400000);
   const wd = d.getUTCDay() || 7;
@@ -216,6 +274,40 @@ export function lotCost(t: LotTariff, date: string, start: number, hours: number
   }
   if (t.dayCap) cost = Math.min(cost, t.dayCap * Math.ceil(total / 1440));
   return Math.round(cost * 100) / 100;
+}
+
+/** Does the zone charge at that moment (sec after local midnight of `date`)? */
+export const zonePaidAt = (z: ParkingZone, date: string, sec: number) => ruleAt(z.rules, date, sec);
+
+/**
+ * €/h a car park charges at that moment: 0 = free then, null = unknown or not hourly (P+R day ticket).
+ * Rates by time already parked count from the first one.
+ */
+export function lotRateAt(t: LotTariff, date: string, sec: number): number | null {
+  if (!t.known || t.flat) return null;
+  if (t.free) return 0;
+  if (t.tiers) return t.tiers[0]?.perHour ?? 0;
+  return t.rates?.find((r) => ruleAt(r.rules, date, sec))?.perHour ?? 0;
+}
+
+/**
+ * OpenStreetMap volunteers tag some public car parks inside municipal paid zones as free,
+ * often from before the zone reached them. The zone's price applies there, so such a car
+ * park takes the zone's tariff. Shop car parks (customers) and P+R keep their own rules.
+ */
+export function zoneLot<L extends Pick<Lot, "src" | "access" | "t">>(l: L, zone: ParkingZone | null): L {
+  if (!zone || l.src !== "osm" || !l.t.free || (l.access !== "public" && l.access !== "unknown")) return l;
+  return {
+    ...l,
+    t: {
+      known: true,
+      rates: [{ rules: zone.rules, perHour: zone.price }],
+      zone,
+      maxStayMin: l.t.maxStayMin,
+      text: [`${zone.city}, ${zone.zone.toLowerCase()}: ${zone.text}`, ...l.t.text.filter((x) => !x.startsWith("Nemokama"))],
+      assumed: "OpenStreetMap žymi kaip nemokamą, bet aikštelė yra mokamoje zonoje – skaičiuojame zonos kainą. Vadovaukitės ženklais vietoje.",
+    },
+  };
 }
 
 export type Chance = "high" | "mid" | "low";
@@ -263,10 +355,12 @@ export function evalParking(o: ParkingOption, plan: PlanResponse, s: Settings): 
   return evalParkingAt(o, plan.depart.date, plan.car ? localSecondsAt(plan.car.drive.arrivalAt, plan.depart.date) : plan.depart.sec, s);
 }
 
-/** The same for an arrival at `arriveSec` (seconds after local midnight of `date`), e.g. a hybrid trip's hub. */
-export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number, s: Settings): ParkingEval {
+/**
+ * The same for an arrival at `arriveSec` (seconds after local midnight of `date`), e.g. a hybrid
+ * trip's hub, where the car stands longer than the stay at B (`hours`).
+ */
+export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number, s: Settings, hours = s.parkingHours): ParkingEval {
   let start = arriveSec;
-  const hours = s.parkingHours;
   const walkSec = Math.round(o.walk / 1.3);
   const base: ParkingEval = { option: o, cost: null, costNote: "", walkSec, searchSec: 0, chance: null, chanceText: null, charge: bestCharge(o.chargers, s, hours), usable: true };
 
@@ -285,9 +379,11 @@ export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number,
       base.costNote = z.note;
     } else if (o.fee === "yes") {
       base.costNote = "mokama, kaina nežinoma";
+    } else if (o.zoneUnknown && o.fee !== "no") {
+      base.costNote = "galimai mokama zona – šio miesto kainų neturime";
     } else {
       base.cost = 0;
-      base.costNote = "ne mokamoje zonoje";
+      base.costNote = o.fee === "no" ? "nemokama (pagal OpenStreetMap)" : "ne mokamoje zonoje";
     }
     if (o.maxStayMin && o.maxStayMin < hours * 60) {
       base.usable = false;
@@ -313,7 +409,12 @@ export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number,
   const l = o.lot!;
   base.searchSec = l.gated ? 90 : 60;
   start += base.searchSec;
-  if (hasEvPermit(s) && l.src === "judu" && !l.gated && l.t.known && !l.t.flat) {
+  if (l.t.zone) {
+    // The zone's price, with its EV-permit rules and dearer first hour.
+    const z = zoneCost(l.t.zone, date, start, hours, s);
+    base.cost = z.cost;
+    base.costNote = z.note;
+  } else if (hasEvPermit(s) && l.src === "judu" && !l.gated && l.t.known && !l.t.flat) {
     // JUDU's EV permit covers its car parks without a barrier.
     base.cost = 0;
     base.costNote = "nemokama su JUDU elektromobilio leidimu";
@@ -340,17 +441,26 @@ export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number,
 /** € a minute of the user's time is worth when weighing price against walking ("balanced"). */
 export const MINUTE_EUR = { balanced: 0.15, fast: 1, cheap: 0.02, green: 0.15 } satisfies Record<Priority, number>;
 
-/** The place to leave the car that suits the priority best; never one with an unknown price. */
-export function bestParking(evals: ParkingEval[], p: Priority): ParkingEval | null {
+/**
+ * The place to leave the car that suits the priority best; never one with an unknown price.
+ * `preferCharge`: an EV charging while parked saves a separate charging stop (as for combinations).
+ */
+export function bestParking(evals: ParkingEval[], p: Priority, preferCharge = false): ParkingEval | null {
   const ok = evals.filter((e) => e.usable && e.cost != null && e.chance !== "low");
   const pool = ok.length ? ok : evals.filter((e) => e.usable && e.cost != null);
   if (!pool.length) return null;
   // Prices tagged by OpenStreetMap volunteers can be out of date: a small penalty keeps
   // official and operator-published prices ahead when the difference is small.
   const score = (e: ParkingEval) =>
-    e.cost! + ((e.walkSec + e.searchSec) / 60) * MINUTE_EUR[p] + (e.chance === "mid" ? 0.5 : 0) + (e.option.lot?.src === "osm" && e.cost! > 0 ? 0.5 : 0);
+    e.cost! +
+    ((e.walkSec + e.searchSec - (preferCharge && e.charge && e.charge.kWh >= 10 ? CHARGE_BONUS_SEC : 0)) / 60) * MINUTE_EUR[p] +
+    (e.chance === "mid" ? 0.5 : 0) +
+    (e.option.lot?.src === "osm" && e.cost! > 0 ? 0.5 : 0);
   return [...pool].sort((a, b) => score(a) - score(b))[0];
 }
+
+/** Charging while parked counts in the choice of a place only when the profile asks for it. */
+export const prefersCharge = (s: Settings) => isEv(s) && s.chargeWhenParked;
 
 /** All options under this profile; chargers only for cars that can charge. */
 export function parkingEvals(plan: PlanResponse, s: Settings): ParkingEval[] {
@@ -366,7 +476,8 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
     const units = (km * s.consumption) / 100;
     const lines: CostLine[] = [{ label: FUELS[s.fuel].label, value: units * s.fuelPrice, note: `${units.toFixed(1)} ${FUELS[s.fuel].unit}` }];
     const evals = parkingEvals(plan, s);
-    const park = evals.find((e) => e.option.id === parkingId) ?? bestParking(evals, s.priority);
+    // No place with a known price: still park at B, with the price shown as unknown (never as free).
+    const park = evals.find((e) => e.option.id === parkingId) ?? bestParking(evals, s.priority, prefersCharge(s)) ?? evals.find((e) => e.usable && e.option.kind === "zone") ?? null;
     let duration = c.duration;
     if (park) {
       // Replace the server's default "find a spot and walk" allowance with this place's.
@@ -387,6 +498,7 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
       distance: c.distance,
       cost: lines.reduce((a, l) => a + l.value, 0),
       costLines: lines,
+      costUnknown: lines.some((l) => l.unknown),
       co2: units * FUELS[s.fuel].co2,
       kcal: 0,
       feasible: s.hasCar,
@@ -435,15 +547,18 @@ export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | 
 
   if (plan.scooter) {
     const sc = plan.scooter;
+    const own = sc.source === "own";
     const minutes = Math.ceil(sc.rideDuration / 60);
-    const cost = s.scooterUnlock + minutes * s.scooterPerMin;
+    const cost = own ? 0 : s.scooterUnlock + minutes * s.scooterPerMin;
     out.push({
       id: "scooter",
       duration: sc.duration,
       distance: sc.distance,
       cost,
-      costLines: [{ label: "Paspirtuko nuoma", value: cost, approx: true, note: `${s.scooterUnlock.toFixed(2)} € + ${minutes} min × ${s.scooterPerMin.toFixed(2)} €` }],
-      co2: (sc.distance / 1000) * SCOOTER_CO2_KM,
+      costLines: own
+        ? [{ label: "Savas paspirtukas", value: 0, note: "nuomoti nereikia" }]
+        : [{ label: "Paspirtuko nuoma", value: cost, approx: true, note: `${s.scooterUnlock.toFixed(2)} € + ${minutes} min × ${s.scooterPerMin.toFixed(2)} €` }],
+      co2: (sc.distance / 1000) * (own ? OWN_SCOOTER_CO2_KM : SCOOTER_CO2_KM),
       kcal: 0,
       feasible: sc.rideDuration <= 45 * 60,
       why: sc.rideDuration > 45 * 60 ? "Per toli paspirtukui" : undefined,
@@ -571,6 +686,12 @@ export const SWITCH_PENALTY_SEC = 240;
 export const CHARGE_BONUS_SEC = 600;
 
 const scooterPrice = (rideSec: number, s: Settings) => s.scooterUnlock + Math.ceil(rideSec / 60) * s.scooterPerMin;
+
+/** Hours the car stands at a hub: the stay at B plus the second leg there and back. */
+export function hubStayHours(h: Pick<HybridOption, "arrive" | "parkedAt" | "searchSec">, s: Settings): number {
+  const away = Math.max(0, h.arrive - h.parkedAt - h.searchSec);
+  return s.parkingHours + (2 * away) / 3600;
+}
 const bikesharePrice = (rideSec: number) => Math.max(0, Math.ceil((rideSec / 60 - BIKESHARE_FREE_MIN) / 30)) * BIKESHARE_EXTRA_PER_30;
 
 /**
@@ -580,9 +701,11 @@ const bikesharePrice = (rideSec: number) => Math.max(0, Math.ceil((rideSec / 60 
 export function summarizeHybrids(plan: PlanResponse, hybrids: HybridOption[], s: Settings): HybridSummary[] {
   const out: HybridSummary[] = [];
   const badWeather = plan.weather?.risk === "bad" ? `Nerekomenduojama: ${plan.weather.reasons.join(", ")}` : undefined;
+  const kinds = hybridKinds(s);
   for (const h of hybrids) {
-    if (!s.hybridModes.includes(h.second.kind)) continue;
-    const park = evalParkingAt(h.hub, plan.depart.date, h.parkedAt, s);
+    if (!kinds.includes(h.second.kind)) continue;
+    // The car stands at the hub for the stay at B and both ways of the second leg.
+    const park = evalParkingAt(h.hub, plan.depart.date, h.parkedAt, s, hubStayHours(h, s));
     if (!park.usable || park.cost == null) continue;
     const km = h.car.distance / 1000;
     const units = (km * s.consumption) / 100;
@@ -621,6 +744,13 @@ export function summarizeHybrids(plan: PlanResponse, hybrids: HybridOption[], s:
       kcal = (b.ride / 1000) * 28 + ((b.walkTo + b.walkFrom) / 1000) * 55;
       distance += b.walkTo + b.ride + b.walkFrom;
       if (b.rideDuration > 60 * 60) [feasible, why] = [false, "Per toli dviračiu"];
+      weatherWarning = badWeather;
+    } else if (sec.scooter.source === "own") {
+      const sc = sec.scooter;
+      lines.push({ label: "Savas paspirtukas", value: 0, note: "iš bagažinės – nuomoti nereikia, atgal juo pačiu" });
+      co2 += (sc.distance / 1000) * OWN_SCOOTER_CO2_KM;
+      distance += sc.distance;
+      if (sc.rideDuration > 45 * 60) [feasible, why] = [false, "Per toli paspirtukui"];
       weatherWarning = badWeather;
     } else {
       const sc = sec.scooter;

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { useSettings } from "@/components/planner/settings";
 import { NumberField, PRIORITIES } from "@/components/planner/SettingsPanel";
+import { TravelModes } from "@/components/planner/TravelModes";
 import { DEFAULT_SETTINGS, FUELS, isEv, type Fuel, type Settings } from "@/lib/metrics";
 import type { Connector } from "@/lib/plan-types";
 
@@ -146,18 +147,11 @@ export function ProfileView() {
           {s.hasCar && (
             <Card title="Deriniai su automobiliu" tone="var(--car)">
               <p className="text-xs text-[var(--muted)]">
-                Planuoklė gali pasiūlyti palikti automobilį pakeliui (P+R, pigesnė aikštelė ar gatvė, įkroviklis) ir toliau keliauti kitaip. Kiek laiko automobilis stovės, spėjama
-                pagal tikslą ir laiką – ir pagal tai, ką pataisote.
+                Planuoklė gali pasiūlyti palikti automobilį pakeliui (P+R, pigesnė aikštelė ar gatvė, įkroviklis) ir toliau keliauti viešuoju transportu, Cyclocity ar paspirtuku –
+                tik tomis priemonėmis, kurias pažymite čia arba po A ir B laukeliais. Su savu paspirtuku automobilį galima palikti bet kur pakeliui. Kiek laiko automobilis stovės,
+                spėjama pagal tikslą ir laiką – ir pagal tai, ką pataisote.
               </p>
-              {(
-                [
-                  ["transit", "Viešuoju transportu", "P+R bilietas Vilniuje apima ir autobusą"],
-                  ["bikeshare", "Cyclocity dviračiu", "Vilniuje, balandžio–spalio mėn."],
-                  ["scooter", "Paspirtuku", "Kol nėra operatoriaus duomenų – vertinimas"],
-                ] as const
-              ).map(([k, label, hint]) => (
-                <Check key={k} checked={s.hybridModes.includes(k)} onChange={(v) => set("hybridModes", v ? [...new Set([...s.hybridModes, k])] : s.hybridModes.filter((x) => x !== k))} label={label} hint={hint} />
-              ))}
+              <TravelModes s={s} onChange={save} />
               {ev && (
                 <Check
                   checked={s.chargeWhenParked}
