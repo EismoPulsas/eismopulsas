@@ -7,5 +7,5 @@ type Variant = keyof typeof type;
 /** The only text primitive: a type-scale variant + a semantic colour. */
 export function AppText({ variant = "body", color = "ink", style, ...rest }: TextProps & { variant?: Variant; color?: keyof Palette }) {
   const c = useColors();
-  return <Text style={[type[variant], { color: c[color] }, style]} {...rest} />;
+  return <Text style={[type[variant], { color: c[color], flexShrink: 1 }, style]} {...rest} />;
 }

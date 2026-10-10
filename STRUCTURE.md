@@ -317,19 +317,19 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
 | Path | Responsibility |
 |---|---|
 | `mobile/app.json` | Name "Eismo Pulsas", Android package `lt.eismopulsas.app`, scheme, plugins (expo-router, splash, datetimepicker) |
-| `mobile/src/app/_layout.tsx` | Root `Stack` (no tab bar), theme from tokens, `AppStateProvider` |
+| `mobile/src/app/_layout.tsx` | Root `Stack` (no tab bar), Home deep-link anchor, measured wrapping `ScreenHeader`, theme from tokens, `AppStateProvider` |
 | `mobile/src/app/index.tsx` | **Home**: Iš / Į (address search), Atvykti iki (Šiandien/Rytoj + native time picker), optional stay, profile line, "Palyginti", saved trips |
 | `mobile/src/app/plan.tsx` | **Comparison**: context line, preference selector (sends a new request), recommendation + sentence, alternatives, unavailable strategies, "Kodėl?" (assumptions + sources), demo-data note, "Išsaugoti" |
 | `mobile/src/app/route/[id].tsx` | **Route detail**: time, departure/arrival, cost/CO₂, reason, map, leg timeline, cost breakdown |
 | `mobile/src/app/saved.tsx` | **Saved trips**: open (one tap), delete with undo |
 | `mobile/src/app/profile.tsx` | **Profile**: car yes/no, fuel, consumption, PT pass, max walking, priority |
 | `mobile/src/api/contract.ts` | Type-only re-export of `lib/mobility/types.ts` (the canonical contract) |
-| `mobile/src/api/client.ts` | BFF client (`fetchPlan`, `geocode`), base URL from `EXPO_PUBLIC_API_BASE_URL`, 15 s timeout, Lithuanian errors |
-| `mobile/src/state/app-state.tsx` | Profile, saved trips, trip draft, plan request lifecycle (stale responses ignored) |
-| `mobile/src/state/storage.ts` | AsyncStorage persistence (`eismopulsas.profile.v1`, `eismopulsas.savedTrips.v1`) |
+| `mobile/src/api/client.ts`, `validate-response.ts` | BFF client (`fetchPlan`, `geocode`), validated HTTP(S) origin from `EXPO_PUBLIC_API_BASE_URL`, 15 s deadline through body decoding, cancellation, checks of fields consumed by the UI, Lithuanian errors |
+| `mobile/src/state/app-state.tsx` | Profile, saved trips, trip draft; hydration gate, one active plan, cancellation on leaving comparison, exact-request retry, stale responses ignored, synchronous save guard |
+| `mobile/src/state/storage.ts` | AsyncStorage persistence (`eismopulsas.profile.v1`, `eismopulsas.savedTrips.v1`); validates loaded values and serialises writes per key |
 | `mobile/src/domain/trip.ts`, `labels.ts` | Trip draft, saved trip, request building, default profile; Lithuanian labels |
 | `mobile/src/format/lt.ts` | lt-LT numbers, €, kg, durations, clock, ISO with offset, plural, decimal-comma parsing |
-| `mobile/src/ui/*` | One primitive per component: `tokens`, `text`, `button`, `segmented`, `inline-message`, `place-field`, `option-row` (+ leg strip), `saved-trip-row`, `route-map` (+ `.web` placeholder), `screen` |
+| `mobile/src/ui/*` | One primitive per component: `tokens`, `text`, `button`, `segmented`, `inline-message`, `place-field`, `option-row` (+ leg strip), `saved-trip-row`, `route-map` (+ `.web` placeholder), `screen` (keyboard avoidance, safe side/bottom insets), `screen-header` (safe top inset) |
 
 **State ownership:**
 - The profile and saved trips belong to `AppStateProvider`; they are loaded from storage at start and written on change.
@@ -363,10 +363,10 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
   - Android **emulator** → `http://10.0.2.2:3000`;
   - **physical phone** → `http://<dev machine LAN IP>:3000`, on the same Wi-Fi, with the Windows firewall allowing port 3000. `next dev` listens on all interfaces and prints the "Network" URL;
   - **Vercel Preview / production** → `https://<deployment>.vercel.app`. Preview deployments with Vercel Authentication enabled are not reachable from the app: use production or disable protection for the Preview.
-- Missing base URL → the app shows "Nenustatytas serverio adresas" instead of failing silently.
+- Missing or malformed base URL → an inline setup error on Home before planning. It must be an HTTP(S) **origin** (no credentials, path, query or fragment). Native builds reject `localhost`, `127.x.x.x`, `0.0.0.0` and `[::1]`; use the emulator/LAN/deployment address above. Fix `EXPO_PUBLIC_API_BASE_URL`, restart Expo and fully reload the app; installed bundles need rebuilding.
 - Plain `http://` to a LAN address is normally fine in Expo Go during development (not verified on a device here). A release APK should use HTTPS (the Vercel URL), because Android blocks cleartext traffic by default.
 - React Native `fetch` is not subject to CORS. The BFF sends no CORS headers; a web build of the app would need them (not planned).
-- Timeouts: 15 s on the client; 2,5 s each for zone lookup and occupancy on the server (in parallel).
+- Timeouts: 15 s on the client including body decoding; 2,5 s each for zone lookup and occupancy on the server (in parallel). Leaving a loading comparison aborts the client request; retry sends its stored request unchanged. Address edits/clear/unmount cancel search and discard stale results. No automatic network retry.
 - Versioning: the response carries `version: 1`. Contract changes go through ROUTING.md § 9 + `lib/mobility/types.ts` in one PR; the app's type-check catches drift.
 
 ## B5. Root tooling isolation (CURRENT, ADR-0003)

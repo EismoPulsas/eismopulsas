@@ -11,11 +11,13 @@ export function Segmented<T extends string | number>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string;
   options: Option<T>[];
   value: T | undefined;
   onChange: (v: T) => void;
+  disabled?: boolean;
 }) {
   const c = useColors();
   return (
@@ -26,15 +28,16 @@ export function Segmented<T extends string | number>({
           <Pressable
             key={String(o.value)}
             accessibilityRole="radio"
-            accessibilityState={{ checked: selected }}
+            accessibilityState={{ checked: selected, disabled }}
             accessibilityLabel={o.label}
-            onPress={() => onChange(o.value)}
+            disabled={disabled}
+            onPress={() => { if (!selected) onChange(o.value); }}
             style={({ pressed }) => [
               styles.item,
               { borderColor: selected ? c.accent : c.control, backgroundColor: selected ? c.accent : "transparent" },
               pressed && { opacity: 0.7 },
             ]}>
-            <AppText variant="label" style={{ color: selected ? c.onAccent : c.ink }}>
+            <AppText variant="label" style={{ textAlign: "center", color: selected ? c.onAccent : disabled ? c.ink2 : c.ink }}>
               {o.label}
             </AppText>
           </Pressable>
@@ -48,6 +51,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", flexWrap: "wrap", gap: space.s },
   item: {
     minHeight: minTarget,
+    minWidth: minTarget,
+    maxWidth: "100%",
+    flexShrink: 1,
+    paddingVertical: space.s,
     paddingHorizontal: space.m,
     borderWidth: 1,
     borderRadius: radius.control,

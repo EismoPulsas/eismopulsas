@@ -49,6 +49,12 @@ export function toIsoWithOffset(day: Date, hhmm: string): string {
 
 export const clockOf = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
+/** Cached summaries always carry their date and time, including across days. */
+export function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat("lt-LT", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+}
+
 /** Lithuanian plural: [1 minutė, 2 minutės, 10 minučių]. */
 export function plural(n: number, forms: [string, string, string]): string {
   const mod10 = n % 10;

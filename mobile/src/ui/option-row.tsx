@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from "react-native";
 
 import type { Leg, RouteOption } from "@/api/contract";
-import { formatClock, formatDuration, formatEur, formatKg } from "@/format/lt";
+import { formatClock, formatDuration, formatEur, formatKg, plural } from "@/format/lt";
 import { AppText } from "@/ui/text";
 import { minTarget, space, useColors, type Palette } from "@/ui/tokens";
 
@@ -66,10 +66,14 @@ export function OptionRow({ option, recommended, onPress }: { option: RouteOptio
   const time = formatDuration(m.durationMin);
   const cost = formatEur(m.costEur, option.basis.cost);
   const co2 = formatKg(m.co2Kg, option.basis.co2);
-  const a11y = `${recommended ? "Rekomenduojama. " : ""}${option.title}. ${time}, ${cost.replace("~", "apie ")}, CO₂ ${co2.replace("~", "apie ")}. Išvykite ${formatClock(option.departAt)}. ${option.summary}`;
+  const spokenTime = `${m.durationMin} ${plural(m.durationMin, ["minutė", "minutės", "minučių"])}`;
+  const spokenCost = cost.replace("~", "apie ").replace("€", "euro");
+  const spokenCo2 = m.co2Kg === null ? "nežinoma" : co2.replace("~", "apie ").replace("kg", "kilogramo");
+  const a11y = `${recommended ? "Rekomenduojama. " : ""}${option.title}. ${spokenTime}, ${spokenCost}, anglies dioksido ${spokenCo2}. Išvykite ${formatClock(option.departAt)}.${late ? ` Vėluosite ${option.feasibility.lateMin} min.` : ""} ${option.summary.replace(/~/g, "apie ").replace(/€/g, "euro").replace(/CO₂/g, "anglies dioksido")}`;
 
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
       accessibilityLabel={a11y}
       accessibilityHint="Atidaro maršruto detales ir žemėlapį"
@@ -91,6 +95,7 @@ export function OptionRow({ option, recommended, onPress }: { option: RouteOptio
         <View style={styles.headline}>
           <AppText variant="numeric">{time}</AppText>
           <AppText color="ink2">Išvykite {formatClock(option.departAt)}</AppText>
+          {late ? <AppText color="warning">Vėluosite {option.feasibility.lateMin} min</AppText> : null}
         </View>
       ) : null}
       <View style={styles.metrics}>
@@ -111,6 +116,6 @@ const styles = StyleSheet.create({
   strip: { flexDirection: "row", flexWrap: "wrap", columnGap: space.xs },
   headline: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: space.m },
   metrics: { flexDirection: "row", flexWrap: "wrap", columnGap: space.xl, rowGap: space.xs },
-  metric: { minWidth: 80 },
+  metric: { minWidth: 80, maxWidth: "100%", flexShrink: 1 },
   strong: { fontWeight: "600" },
 });

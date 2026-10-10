@@ -22,7 +22,7 @@ export default function RouteDetail() {
   if (!option) {
     return (
       <Screen>
-        <InlineMessage text="Maršrutas nerastas – palyginkite kelionę iš naujo." actionLabel="Atgal" onAction={() => router.back()} />
+        <InlineMessage text="Maršrutas nerastas – palyginkite kelionę iš naujo." actionLabel="Atgal" onAction={() => router.canGoBack() ? router.back() : router.replace("/")} />
       </Screen>
     );
   }
@@ -32,9 +32,10 @@ export default function RouteDetail() {
 
   return (
     <>
-      <Stack.Screen options={{ title: option.title }} />
+      <Stack.Screen options={{ title: "Maršrutas" }} />
       <Screen>
         <View style={styles.group}>
+          <AppText variant="section" accessibilityRole="header">{option.title}</AppText>
           {option.status === "recommended" ? (
             <AppText variant="label" color="accent">
               Rekomenduojama
@@ -104,8 +105,8 @@ export default function RouteDetail() {
 
 const styles = StyleSheet.create({
   group: { gap: space.s },
-  flex: { flex: 1 },
-  leg: { flexDirection: "row", gap: space.m, paddingVertical: space.s, borderBottomWidth: StyleSheet.hairlineWidth },
-  time: { width: 52 },
-  costRow: { flexDirection: "row", gap: space.m, alignItems: "baseline" },
+  flex: { flexGrow: 1, flexShrink: 1, flexBasis: 160, minWidth: 0 },
+  leg: { flexDirection: "row", flexWrap: "wrap", gap: space.m, paddingVertical: space.s, borderBottomWidth: StyleSheet.hairlineWidth },
+  time: { minWidth: 52, flexShrink: 1 },
+  costRow: { flexDirection: "row", flexWrap: "wrap", gap: space.m, alignItems: "baseline" },
 });

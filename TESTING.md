@@ -52,6 +52,25 @@ Three parts:
 | App client code (`mobile/src/api`, `domain`) run in Node against the dev BFF | geocode → build request → plan for all four preferences → error path OK. This found and fixed a bug: a "Pigiausias" headline was shown when cheaper options were excluded by the walking limit |
 | Android device / emulator, TalkBack, font scale | **not done** |
 
+## B0a. Mobile hardening verification (2026-10-10, Codex Agent 2)
+
+Areas: **mobile + docs**. BFF, contract, providers and legacy code unchanged. No dependency/config/lockfile changes; the root checks below confirm the existing isolation.
+
+| Check | Result |
+|---|---|
+| `mobile/`: `npx tsc --noEmit`, `npm run lint` | exit 0, no lint warnings (initial findings corrected) |
+| `mobile/`: `npx expo-doctor` | 21/21 passed |
+| Android export (B1, temporary directory) | exit 0; final Hermes bundle 2,9 MB, 1321 modules |
+| Static web export (temporary directory) | All five app routes plus sitemap/not-found; initial hydration/empty states |
+| Root `npm run lint`, `npm run build` | exit 0; existing legacy and mobility routes built |
+| `git diff --check` | exit 0 |
+| Ad-hoc client/storage checks using the existing TypeScript compiler in Node | Passed: missing/malformed/native-loopback URL with no fetch, emulator/LAN/HTTPS origins, network errors, headers/body stall deadline, HTTP 400/401/403/429/5xx, malformed responses, cancellation; invalid local values and ordered writes |
+| Chromium web checks with intercepted API responses (no live BFF or external provider calls) | Passed: Lithuanian input kept after failure; search retry and stale-search rejection; double search/compare/save guards; retry body unchanged; saving/reopening; timestamped cached summary on failure; restored-network retry; decimal comma + fuel change; preference change; leaving loading comparison; Home deep-link anchor |
+| Web layout | Home at **320 / 360 / 412 px**, light/dark, default and doubled text. All five screens at **320 px** with doubled text in light/dark: no horizontal overflow; exposed control targets ≥ 48 px. Lower form controls reached by scrolling |
+| Native Android / emulators / TalkBack | **NOT VERIFIED.** Web text enlargement is a layout approximation, not Android font scaling or keyboard/SafeArea testing. No Android tooling/device was available |
+
+The ad-hoc harness and screenshots are local ignored artifacts in `mobile/.expo/`; no permanent test runner was added (B6a). Phone sign-off is still required by B5 and DESIGN.md › B20; use HANDOFF_CODEX2.md for the exact source commit and outstanding checks.
+
 ## B1. Automated checks
 
 | Command | Where | Expected |
@@ -191,11 +210,17 @@ Expected:
 
 | Condition | Expected |
 |---|---|
-| Airplane mode, open a saved trip | The last cached result with its timestamp + offline message + retry |
+| Airplane mode, open a saved trip | The existing cached recommendation **summary** with date/time + network error + retry. Full offline routes remain unimplemented (ROUTING.md § 10) |
 | Airplane mode, new search | Inline error; the input is kept |
 | Network restored | Retry works without restarting the app |
 | Slow network (throttled or a weak signal) | Skeleton + text; the user can go back; no duplicate requests from repeated taps |
 | BFF unreachable in development | Check `EXPO_PUBLIC_API_BASE_URL` (the phone cannot reach `localhost` on the dev machine; STRUCTURE.md › B4) |
+| Missing/malformed/loopback API origin on native | Home shows a setup error before planning. No network request; correct the build-time URL, restart Expo/full reload or rebuild the installed bundle |
+| Response headers arrive but body stalls | Same 15 s deadline; error + retry, no indefinite loading |
+| HTML, wrong response version or malformed option | Inline error + retry, no render crash |
+| Back while loading; repeated compare/search/save taps | Request cancelled, draft preserved, old response ignored; only one active request/save |
+| Edit address before search completes | Cancel/discard the old search; no results for a previous query; typed text kept |
+| Hydration / rapid profile changes | Inputs wait for stored profile/trips. Consumption + fuel change both survive; serialized storage writes keep their order |
 
 ## B6a. When to add a test runner (PROPOSED, needs an ADR)
 

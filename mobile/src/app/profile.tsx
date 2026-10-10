@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Switch, TextInput, View } from "react-native";
 
 import type { FuelType, Preference } from "@/api/contract";
 import { FUEL_LT, PREFERENCE_HINT_LT, PREFERENCE_LT } from "@/domain/labels";
@@ -17,12 +17,15 @@ const PREFERENCES: Preference[] = ["balanced", "fastest", "cheapest", "greener"]
 function SwitchRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   const c = useColors();
   return (
-    <View style={styles.switchRow}>
+    <Pressable style={styles.switchRow} accessibilityRole="switch" accessibilityLabel={label}
+      accessibilityState={{ checked: value }} onPress={() => onChange(!value)}>
       <AppText variant="rowTitle" style={styles.flex}>
         {label}
       </AppText>
-      <Switch accessibilityLabel={label} value={value} onValueChange={onChange} trackColor={{ true: c.accent, false: c.control }} />
-    </View>
+      <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
+        <Switch accessible={false} focusable={false} value={value} trackColor={{ true: c.accent, false: c.control }} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -59,6 +62,12 @@ function RadioList<T extends string>({ label, options, value, onChange }: { labe
 
 // Minimal mobility profile. Saved on change, only on this phone.
 export default function Profile() {
+  const { ready } = useAppState();
+  if (!ready) return <Screen><AppText color="ink2" accessibilityLiveRegion="polite">Įkeliamas profilis…</AppText></Screen>;
+  return <ProfileForm />;
+}
+
+function ProfileForm() {
   const c = useColors();
   const { profile, updateProfile } = useAppState();
   const [consumptionText, setConsumptionText] = useState(String(profile.car.consumption).replace(".", ","));
@@ -72,13 +81,13 @@ export default function Profile() {
       return;
     }
     setConsumptionError(null);
-    updateProfile({ ...profile, car: { ...profile.car, consumption: n } });
+    updateProfile((current) => ({ ...current, car: { ...current.car, consumption: n } }));
   }
 
   return (
     <Screen>
       <View style={styles.group}>
-        <SwitchRow label="Turiu automobilį" value={profile.car.available} onChange={(available) => updateProfile({ ...profile, car: { ...profile.car, available } })} />
+        <SwitchRow label="Turiu automobilį" value={profile.car.available} onChange={(available) => updateProfile((current) => ({ ...current, car: { ...current.car, available } }))} />
         {profile.car.available ? (
           <>
             <AppText variant="label" color="ink2">
@@ -88,7 +97,7 @@ export default function Profile() {
               label="Kuro tipas"
               options={FUELS.map((f) => ({ value: f, label: FUEL_LT[f] }))}
               value={profile.car.fuel}
-              onChange={(fuel) => updateProfile({ ...profile, car: { ...profile.car, fuel } })}
+              onChange={(fuel) => updateProfile((current) => ({ ...current, car: { ...current.car, fuel } }))}
             />
             <AppText variant="label" color="ink2">
               Sąnaudos ({unit})
@@ -96,10 +105,13 @@ export default function Profile() {
             <TextInput
               accessibilityLabel={`Sąnaudos, ${unit}`}
               value={consumptionText}
-              onChangeText={setConsumptionText}
+              onChangeText={(text) => { setConsumptionText(text); setConsumptionError(null); }}
               onEndEditing={commitConsumption}
-              onSubmitEditing={commitConsumption}
+              onBlur={Platform.OS === "web" ? commitConsumption : undefined}
               keyboardType="decimal-pad"
+              returnKeyType="done"
+              maxLength={6}
+              accessibilityHint={`Įveskite nuo 1 iki 40 ${unit}. Galima naudoti dešimtainį kablelį.`}
               style={[typeScale.body, styles.input, { borderColor: c.control, color: c.ink, backgroundColor: c.surface }]}
             />
             {consumptionError ? <InlineMessage tone="warning" text={consumptionError} /> : null}
@@ -111,7 +123,7 @@ export default function Profile() {
         )}
       </View>
 
-      <SwitchRow label="Turiu periodinį viešojo transporto bilietą" value={profile.transitPass} onChange={(transitPass) => updateProfile({ ...profile, transitPass })} />
+      <SwitchRow label="Turiu periodinį viešojo transporto bilietą" value={profile.transitPass} onChange={(transitPass) => updateProfile((current) => ({ ...current, transitPass }))} />
 
       <View style={styles.group}>
         <AppText variant="label" color="ink2">
@@ -121,7 +133,7 @@ export default function Profile() {
           label="Daugiausia pėsčiomis"
           options={[5, 10, 15, 20].map((v) => ({ value: v, label: `${v} min` }))}
           value={profile.maxWalkMin}
-          onChange={(maxWalkMin) => updateProfile({ ...profile, maxWalkMin })}
+          onChange={(maxWalkMin) => updateProfile((current) => ({ ...current, maxWalkMin }))}
         />
       </View>
 
@@ -133,7 +145,7 @@ export default function Profile() {
           label="Kas svarbiausia"
           options={PREFERENCES.map((p) => ({ value: p, label: PREFERENCE_LT[p], hint: PREFERENCE_HINT_LT[p] }))}
           value={profile.preference}
-          onChange={(preference) => updateProfile({ ...profile, preference })}
+          onChange={(preference) => updateProfile((current) => ({ ...current, preference }))}
         />
       </View>
 
@@ -146,10 +158,10 @@ export default function Profile() {
 
 const styles = StyleSheet.create({
   group: { gap: space.s },
-  flex: { flex: 1 },
+  flex: { flex: 1, minWidth: 0 },
   switchRow: { flexDirection: "row", alignItems: "center", minHeight: minTarget, gap: space.m },
   radio: { flexDirection: "row", alignItems: "center", gap: space.m, minHeight: minTarget, paddingVertical: space.s, borderBottomWidth: StyleSheet.hairlineWidth },
   dot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   dotInner: { width: 10, height: 10, borderRadius: 5 },
-  input: { minHeight: minTarget, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.m },
+  input: { minHeight: minTarget, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.m, paddingVertical: space.s },
 });

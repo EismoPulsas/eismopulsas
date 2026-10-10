@@ -14,8 +14,10 @@ import { space } from "@/ui/tokens";
 // Saved recurring trips ("Darbas"). Deleting offers undo instead of a dialog (DESIGN.md › B10).
 export default function SavedTrips() {
   const router = useRouter();
-  const { trips, openSavedTrip, deleteTrip, restoreTrip } = useAppState();
+  const { ready, trips, openSavedTrip, deleteTrip, restoreTrip, plan } = useAppState();
   const [deleted, setDeleted] = useState<SavedTrip | null>(null);
+
+  if (!ready) return <Screen><AppText color="ink2" accessibilityLiveRegion="polite">Įkeliamos išsaugotos kelionės…</AppText></Screen>;
 
   return (
     <Screen>
@@ -42,9 +44,9 @@ export default function SavedTrips() {
             <SavedTripRow
               key={t.id}
               trip={t}
+              disabled={plan.status === "loading"}
               onPress={() => {
-                openSavedTrip(t);
-                router.push("/plan");
+                if (openSavedTrip(t)) router.navigate("/plan");
               }}
               trailing={<Button kind="text" label="Ištrinti" accessibilityLabel={`Ištrinti „${t.name}“`} onPress={() => setDeleted(deleteTrip(t.id) ?? null)} />}
             />

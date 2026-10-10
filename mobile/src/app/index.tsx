@@ -3,11 +3,13 @@ import { Stack, useRouter } from "expo-router";
 import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
+import { apiConfigurationError } from "@/api/client";
 import { profileLine } from "@/domain/labels";
 import type { Day } from "@/domain/trip";
 import { clockOf } from "@/format/lt";
 import { useAppState } from "@/state/app-state";
 import { Button } from "@/ui/button";
+import { InlineMessage } from "@/ui/inline-message";
 import { PlaceField } from "@/ui/place-field";
 import { SavedTripRow } from "@/ui/saved-trip-row";
 import { Screen } from "@/ui/screen";
@@ -18,13 +20,16 @@ import { minTarget, space } from "@/ui/tokens";
 // Home: where from, where to, arrive by → compare (DESIGN.md › B3). Decision first; no map here.
 export default function Home() {
   const router = useRouter();
-  const { draft, updateDraft, startPlan, trips, openSavedTrip, profile } = useAppState();
+  const { ready, draft, updateDraft, startPlan, trips, openSavedTrip, profile, plan } = useAppState();
   const [pickTime, setPickTime] = useState(false);
-  const canCompare = !!draft.origin && !!draft.destination;
+  const busy = plan.status === "loading";
+  const canCompare = ready && !!draft.origin && !!draft.destination;
 
   const [h, m] = draft.arriveByTime.split(":").map(Number);
   const timeValue = new Date();
   timeValue.setHours(h, m, 0, 0);
+
+  if (!ready) return <Screen><AppText color="ink2" accessibilityLiveRegion="polite">Įkeliamas profilis ir išsaugotos kelionės…</AppText></Screen>;
 
   return (
     <>
@@ -42,6 +47,7 @@ export default function Home() {
         <AppText variant="title" accessibilityRole="header">
           Kaip man geriausia nuvykti?
         </AppText>
+        {apiConfigurationError ? <InlineMessage tone="error" text={apiConfigurationError.message} /> : null}
 
         <View style={styles.group}>
           <PlaceField label="Iš" value={draft.origin} onChange={(origin) => updateDraft({ origin })} />
@@ -113,10 +119,10 @@ export default function Home() {
 
         <Button
           label="Palyginti"
-          disabled={!canCompare}
+          disabled={!canCompare || !!apiConfigurationError}
+          busy={busy}
           onPress={() => {
-            startPlan();
-            router.push("/plan");
+            if (startPlan()) router.navigate("/plan");
           }}
         />
         {!canCompare ? (
@@ -136,9 +142,9 @@ export default function Home() {
               <SavedTripRow
                 key={t.id}
                 trip={t}
+                disabled={busy || !!apiConfigurationError}
                 onPress={() => {
-                  openSavedTrip(t);
-                  router.push("/plan");
+                  if (openSavedTrip(t)) router.navigate("/plan");
                 }}
               />
             ))
@@ -152,6 +158,6 @@ export default function Home() {
 const styles = StyleSheet.create({
   group: { gap: space.s },
   timeRow: { flexDirection: "row", flexWrap: "wrap", gap: space.s, alignItems: "center" },
-  headerLinks: { flexDirection: "row" },
+  headerLinks: { flexDirection: "row", flexWrap: "wrap", flexShrink: 1 },
   profileLine: { minHeight: minTarget, justifyContent: "center" },
 });

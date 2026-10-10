@@ -80,17 +80,17 @@ References were used for principles only, not for visual style: [WCAG 2.2](https
 | Area | Built | Differs from the target / not yet |
 |---|---|---|
 | Screens | `index` (Home = trip input + saved trips), `plan` (comparison), `route/[id]` (detail **with the map inline**), `saved`, `profile` | No separate Plan/Results split and no separate Map screen (fewer screens, same flow). No first-launch setup: defaults are shown in the profile line on Home |
-| Navigation | `Stack`, no tab bar; header actions "Išsaugotos", "Profilis" | — |
+| Navigation | `Stack`, Home deep-link anchor, no tab bar; header actions "Išsaugotos", "Profilis"; header grows/wraps with text and has a 48 dp "Atgal" target | — |
 | Recommendation (B6) | Label "Rekomenduojama", 3 dp accent rule, large time, "Išvykite", cost/CO₂, sentence | "Kodėl?" shows assumptions + sources, not yet the Δ table |
 | Comparison rows (B5) | Rows with hairlines, leg strip, Kaina / CO₂ (and Laikas for alternatives), one-line summary | Leg strip is **text with mode colour** (no SVG icon set yet); best values are not yet bold |
 | Preference | Segmented control on the comparison screen (sends a new request) + radio list in Profile | No bottom sheet |
 | Map (B8) | `react-native-maps`: legs coloured by mode, walking dotted, A / P / B markers, fit to route | No bottom sheet; the leg list sits below the map. Web shows a placeholder |
-| States (B11) | Loading (text + static skeleton), error with retry, all-late heading, unavailable strategies, demo-data note | Offline cached result: only the last-recommendation summary on saved trips |
+| States (B11) | Hydration/loading text + static skeleton; setup, network, timeout and malformed-response errors; explicit retry; all-late heading, unavailable strategies, demo-data note. Saved-trip failure shows its timestamped last-recommendation summary | Full offline route caching not built; native announcements/keyboard behaviour still need device testing |
 | Saved trips (B10) | Save from the comparison screen (default name „Darbas“), one-tap open, delete with undo | Rename / edit time not yet |
 | Profile (B9) | Car, fuel, consumption, PT pass, walking limit, priority; saved immediately | No "Išsaugota" toast; no fuel-price field (the contract supports `fuelPriceEur`) |
 | Tokens (B12–B14) | `mobile/src/ui/tokens.ts`: B13 colours (light/dark), spacing, radius, type scale in sp, 48 dp targets | — |
 | Typography | **System font** (Roboto), no custom font (decision 2026-10-10) | — |
-| Accessibility (B17) | Roles and Lithuanian labels on controls; rows announced as one sentence; live regions for loading/errors | Not yet tested with TalkBack or the largest font scale |
+| Accessibility (B17) | Roles and Lithuanian labels on controls; spoken metric units, busy/disabled/expanded states; whole-row 48 dp switch targets; live regions for loading/errors. Wrapping forms/metrics/timeline, keyboard avoidance and safe insets | Web checked at 320/360/412 px with doubled text (TESTING.md › B0a); not yet tested with TalkBack or the largest Android font scale |
 
 ## B1. Personality
 
@@ -329,6 +329,8 @@ Rules:
 | Component | Rule |
 |---|---|
 | Primary button | Accent fill, ≥ 48 dp tall, full width at the bottom of the input flows. One per screen. |
+| Stack header | Safe top/side insets; measured height, wrapping title/actions, ≥ 48 dp back target labelled "Atgal". Keep the existing titles, actions and semantic colours. |
+| Screen body | Flex-bounded scroll view, safe side/bottom insets and keyboard avoidance using measured header height. Inputs and adjacent actions wrap; allow vertical text padding and keep text scaling enabled. |
 | Secondary button | `control` outline, ink text. |
 | Text button | For "Kodėl?", "Redaguoti", "Atgal". |
 | Search field | Label above, submit action, clear button with an accessible label "Išvalyti". |
@@ -341,6 +343,8 @@ Rules:
 | Bottom sheet | Drag handle + close button; collapsed and expanded states. |
 | Inline message | Info / warning / error with an icon **and** text; an optional action. |
 | Snackbar | Undo for deletions, "Išsaugota" confirmations; announced to TalkBack. |
+
+Search edits/clear discard previous results and cancel a pending request. Search/compare/save guards also apply before a React render, so rapid repeated taps do not submit twice. While comparing, the preference control is disabled. Retry preserves the failed request; configuration errors direct the user to the app preparer. Cached recommendation summaries always show date/time, including on saved-trip network failure.
 
 ## B16. Motion (mobile)
 

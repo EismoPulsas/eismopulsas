@@ -1,9 +1,10 @@
-import { useRouter } from "expo-router";
-import { useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
+import { Keyboard, StyleSheet, TextInput, View } from "react-native";
 
 import type { PlanResponse, Preference } from "@/api/contract";
 import { BASIS_LT, PREFERENCE_LT, STRATEGY_LT } from "@/domain/labels";
+import { formatClock, formatDuration, formatTimestamp } from "@/format/lt";
 import { useAppState } from "@/state/app-state";
 import { Button } from "@/ui/button";
 import { InlineMessage } from "@/ui/inline-message";
@@ -41,7 +42,7 @@ function WhyDetails({ response }: { response: PlanResponse }) {
 function Skeleton() {
   const c = useColors();
   return (
-    <View style={styles.group} accessibilityLabel="Lyginame variantus">
+    <View style={styles.group} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
       {[96, 72, 72].map((h, i) => (
         <View key={i} style={{ height: h, borderRadius: radius.control, backgroundColor: c.skeleton }} />
       ))}
@@ -53,27 +54,34 @@ function Skeleton() {
 export default function PlanScreen() {
   const router = useRouter();
   const c = useColors();
-  const { plan, draft, startPlan, saveTrip, planTripId, trips } = useAppState();
+  const { plan, startPlan, retryPlan, cancelPlan, saveTrip, planTripId, trips } = useAppState();
   const [showWhy, setShowWhy] = useState(false);
   const [name, setName] = useState("Darbas");
+  useFocusEffect(useCallback(() => () => cancelPlan(), [cancelPlan]));
+
+  function save() {
+    if (saveTrip(name)) Keyboard.dismiss();
+  }
 
   if (plan.status === "idle") {
     return (
       <Screen>
-        <InlineMessage text="Pirmiausia nurodykite kelionę." actionLabel="Atgal" onAction={() => router.back()} />
+        <InlineMessage text="Pirmiausia nurodykite kelionę." actionLabel="Atgal" onAction={() => router.dismissTo("/")} />
       </Screen>
     );
   }
 
   const preference = plan.request.profile?.preference ?? "balanced";
   const savedTrip = trips.find((t) => t.id === planTripId);
-  const context = `Į ${plan.request.destination.label ?? "tikslą"} · atvykti iki ${draft.arriveByTime} · ${draft.day === "today" ? "Šiandien" : "Rytoj"}`;
+  const arriveBy = new Date(plan.request.arriveBy);
+  const day = arriveBy.toDateString() === new Date().toDateString() ? "Šiandien" : "Rytoj";
+  const context = `Į ${plan.request.destination.label ?? "tikslą"} · atvykti iki ${formatClock(plan.request.arriveBy)} · ${day}`;
 
   return (
     <Screen>
       <View style={styles.group}>
         <AppText color="ink2">{context}</AppText>
-        <Button kind="text" label="Keisti kelionę" onPress={() => router.back()} />
+        <Button kind="text" label="Keisti kelionę" onPress={() => router.dismissTo("/")} />
       </View>
 
       <View style={styles.group}>
@@ -84,6 +92,7 @@ export default function PlanScreen() {
           label="Prioritetas"
           options={PREFERENCES.map((p) => ({ value: p, label: PREFERENCE_LT[p] }))}
           value={preference}
+          disabled={plan.status === "loading"}
           onChange={(p) => startPlan(p)}
         />
       </View>
@@ -98,7 +107,14 @@ export default function PlanScreen() {
       ) : null}
 
       {plan.status === "error" ? (
-        <InlineMessage tone="error" text={plan.message} actionLabel="Bandyti dar kartą" onAction={() => startPlan(preference)} />
+        <View style={styles.group}>
+          <InlineMessage tone="error" text={plan.message}
+            actionLabel={["no_base_url", "invalid_base_url", "http_401", "http_403"].includes(plan.code) ? undefined : "Bandyti dar kartą"}
+            onAction={retryPlan} />
+          {savedTrip?.last ? <AppText color="ink2">
+            Paskutinė rekomendacija ({formatTimestamp(savedTrip.last.at)}): {savedTrip.last.title} · {formatDuration(savedTrip.last.durationMin)}. Tai ankstesnis rezultatas; dabartinės kelionės dar nepavyko palyginti.
+          </AppText> : null}
+        </View>
       ) : null}
 
       {plan.status === "ok" ? (
@@ -140,7 +156,7 @@ export default function PlanScreen() {
           ))}
 
           <View style={styles.group}>
-            <Button kind="text" label={showWhy ? "Slėpti prielaidas" : "Kodėl? Prielaidos ir šaltiniai"} onPress={() => setShowWhy((v) => !v)} />
+            <Button kind="text" label={showWhy ? "Slėpti prielaidas" : "Kodėl? Prielaidos ir šaltiniai"} accessibilityState={{ expanded: showWhy }} onPress={() => setShowWhy((v) => !v)} />
             {showWhy ? <WhyDetails response={plan.response} /> : null}
           </View>
 
@@ -160,9 +176,11 @@ export default function PlanScreen() {
                     value={name}
                     onChangeText={setName}
                     maxLength={40}
+                    returnKeyType="done"
+                    onSubmitEditing={save}
                     style={[typeScale.body, styles.input, { borderColor: c.control, color: c.ink, backgroundColor: c.surface }]}
                   />
-                  <Button kind="secondary" label="Išsaugoti" disabled={!name.trim()} onPress={() => saveTrip(name)} />
+                  <Button kind="secondary" label="Išsaugoti" disabled={!name.trim()} onPress={save} />
                 </View>
               </>
             )}
@@ -176,6 +194,6 @@ export default function PlanScreen() {
 const styles = StyleSheet.create({
   group: { gap: space.s },
   sectionGap: { marginTop: space.l, marginBottom: space.xs },
-  saveRow: { flexDirection: "row", gap: space.s, alignItems: "center" },
-  input: { flex: 1, minHeight: minTarget, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.m },
+  saveRow: { flexDirection: "row", flexWrap: "wrap", gap: space.s, alignItems: "center" },
+  input: { flexGrow: 1, flexShrink: 1, flexBasis: 180, minWidth: 0, minHeight: minTarget, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.m, paddingVertical: space.s },
 });

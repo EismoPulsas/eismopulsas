@@ -18,7 +18,7 @@ export type PlanState =
 type AppState = {
   ready: boolean;
   profile: MobilityProfile;
-  updateProfile: (next: MobilityProfile) => void;
+  updateProfile: (next: MobilityProfile | ((current: MobilityProfile) => MobilityProfile)) => void;
   trips: SavedTrip[];
   saveTrip: (name: string) => SavedTrip | null;
   deleteTrip: (id: string) => SavedTrip | undefined;
@@ -28,8 +28,10 @@ type AppState = {
   plan: PlanState;
   /** Saved trip the current plan was opened from, if any. */
   planTripId: string | null;
-  startPlan: (preference?: Preference) => void;
-  openSavedTrip: (trip: SavedTrip) => void;
+  startPlan: (preference?: Preference) => boolean;
+  retryPlan: () => void;
+  cancelPlan: () => void;
+  openSavedTrip: (trip: SavedTrip) => boolean;
 };
 
 const Ctx = createContext<AppState | null>(null);
@@ -42,18 +44,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [plan, setPlan] = useState<PlanState>({ status: "idle" });
   const [planTripId, setPlanTripId] = useState<string | null>(null);
   const seq = useRef(0);
+  const active = useRef<AbortController | null>(null);
+  const savedId = useRef<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+    const sequence = seq;
+    const pending = active;
     Promise.all([loadProfile(), loadTrips()]).then(([p, t]) => {
+      if (!mounted) return;
       setProfile(p);
       setTrips(t);
       setReady(true);
     });
+    return () => {
+      mounted = false;
+      ++sequence.current;
+      pending.current?.abort();
+    };
   }, []);
 
-  const updateProfile = useCallback((next: MobilityProfile) => {
-    setProfile(next);
-    saveProfile(next);
+  const updateProfile = useCallback((update: MobilityProfile | ((current: MobilityProfile) => MobilityProfile)) => {
+    setProfile((current) => {
+      const next = typeof update === "function" ? update(current) : update;
+      void saveProfile(next);
+      return next;
+    });
   }, []);
 
   const setTripsPersist = useCallback((update: (t: SavedTrip[]) => SavedTrip[]) => {
@@ -66,10 +82,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const run = useCallback(
     (request: PlanRequest, tripId: string | null) => {
+      if (active.current) return false;
+      const controller = new AbortController();
+      active.current = controller;
       const id = ++seq.current;
+      savedId.current = tripId;
       setPlanTripId(tripId);
       setPlan({ status: "loading", request });
-      fetchPlan(request)
+      fetchPlan(request, controller.signal)
         .then((response) => {
           if (id !== seq.current) return; // a newer request replaced this one
           setPlan({ status: "ok", request, response });
@@ -83,21 +103,41 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           if (id !== seq.current) return;
           const e = err instanceof ApiError ? err : new ApiError("Nepavyko gauti maršrutų.", "unknown");
           setPlan({ status: "error", request, message: e.message, code: e.code });
+        })
+        .finally(() => {
+          if (active.current === controller) active.current = null;
         });
+      return true;
     },
     [setTripsPersist],
   );
 
   const startPlan = useCallback(
     (preference?: Preference) => {
-      const request = buildRequest(draft, profile, preference);
-      if (request) run(request, preference ? planTripId : null);
+      if (!ready) return false;
+      const request = preference && plan.status !== "idle"
+        ? { ...plan.request, profile: { ...(plan.request.profile ?? profile), preference } }
+        : buildRequest(draft, profile, preference);
+      return request ? run(request, preference ? planTripId : null) : false;
     },
-    [draft, profile, run, planTripId],
+    [ready, draft, profile, run, plan, planTripId],
   );
+
+  const retryPlan = useCallback(() => {
+    if (ready && plan.status === "error") run(plan.request, planTripId);
+  }, [ready, plan, planTripId, run]);
+
+  const cancelPlan = useCallback(() => {
+    if (!active.current) return;
+    ++seq.current;
+    active.current.abort();
+    active.current = null;
+    setPlan((previous) => previous.status === "loading" ? { status: "idle" } : previous);
+  }, []);
 
   const openSavedTrip = useCallback(
     (trip: SavedTrip) => {
+      if (!ready || active.current) return false;
       const next: TripDraft = {
         origin: trip.origin,
         destination: trip.destination,
@@ -105,30 +145,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         day: nextDayFor(trip.arriveByTime),
         stayMinutes: trip.stayMinutes,
       };
-      setDraft(next);
       const request = buildRequest(next, profile);
-      if (request) run(request, trip.id);
+      if (!request || !run(request, trip.id)) return false;
+      setDraft(next);
+      return true;
     },
-    [profile, run],
+    [ready, profile, run],
   );
 
   const saveTrip = useCallback(
     (name: string) => {
-      if (!draft.origin || !draft.destination || !name.trim()) return null;
+      if (!ready || plan.status !== "ok" || !name.trim() || savedId.current) return null;
+      const request = plan.request;
+      const rec = plan.response.options.find((o) => o.id === plan.response.recommendation?.optionId);
       const trip: SavedTrip = {
         id: newId(),
         name: name.trim(),
-        origin: draft.origin,
-        destination: draft.destination,
-        arriveByTime: draft.arriveByTime,
-        ...(draft.stayMinutes ? { stayMinutes: draft.stayMinutes } : {}),
+        origin: request.origin,
+        destination: request.destination,
+        arriveByTime: request.arriveBy.slice(11, 16),
+        ...(request.stayMinutes ? { stayMinutes: request.stayMinutes } : {}),
         createdAt: new Date().toISOString(),
+        ...(rec ? { last: { at: plan.response.generatedAt, title: rec.title, durationMin: rec.metrics.durationMin } } : {}),
       };
+      savedId.current = trip.id; // synchronous guard, including taps before React renders
       setTripsPersist((t) => [...t, trip]);
       setPlanTripId(trip.id);
       return trip;
     },
-    [draft, setTripsPersist],
+    [ready, plan, setTripsPersist],
   );
 
   const deleteTrip = useCallback(
@@ -140,7 +185,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [trips, setTripsPersist],
   );
 
-  const restoreTrip = useCallback((trip: SavedTrip) => setTripsPersist((t) => [...t, trip]), [setTripsPersist]);
+  const restoreTrip = useCallback((trip: SavedTrip) => setTripsPersist((t) => t.some((x) => x.id === trip.id) ? t : [...t, trip]), [setTripsPersist]);
   const updateDraft = useCallback((patch: Partial<TripDraft>) => setDraft((d) => ({ ...d, ...patch })), []);
 
   const value = useMemo<AppState>(
@@ -157,9 +202,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       plan,
       planTripId,
       startPlan,
+      retryPlan,
+      cancelPlan,
       openSavedTrip,
     }),
-    [ready, profile, updateProfile, trips, saveTrip, deleteTrip, restoreTrip, draft, updateDraft, plan, planTripId, startPlan, openSavedTrip],
+    [ready, profile, updateProfile, trips, saveTrip, deleteTrip, restoreTrip, draft, updateDraft, plan, planTripId, startPlan, retryPlan, cancelPlan, openSavedTrip],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
