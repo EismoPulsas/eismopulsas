@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   let depart;
   try { depart = departure(q.get("depart")); }
   catch (err) { return Response.json({ error: err instanceof Error ? err.message : "Neteisingas laikas." }, { status: 400 }); }
-  const leg = await routeCar(from, to, depart);
+  const leg = await routeCar(from, to, depart, { curb: q.get("curb") === "1" });
   const body = leg && parkingFor ? { ...leg, parkingOptions: parkingNear(parkingFor, depart.date, localSecondsAt(leg.arrivalAt, depart.date), depart.isNow ? await liveLots() : null, Math.min(20, Math.max(3, Number(q.get("walk")) || 10))) } : leg;
   return Response.json(body ?? { error: "Tinkamo automobilio maršruto nerasta." }, { status: leg ? 200 : 404, headers: { "Cache-Control": "no-store" } });
 }

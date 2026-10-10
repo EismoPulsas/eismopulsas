@@ -2,6 +2,8 @@
 //
 //   npm run data -- parking    # zones, car parks, street-side parking, occupancy profiles
 //   npm run data -- chargers   # EV charging points (Via Lietuva national registry, OCPI 2.3.0)
+//   npm run data -- street     # street-side parking only (zones and areas from parking.json)
+//   npm run data -- scooters   # JUDU scooter parking spots and the Old Town scooter zone
 //
 // Sources (all public, no keys; full inventory with licences in docs/parkavimas-duomenys.md):
 //   - JUDU: rinkliavos zonos (nuo 2025-07-01), aikštelių ribos, užimtumas (dabar ir istorija),
@@ -17,6 +19,7 @@
 //   lots.json           – car parks: JUDU, UNIPARK, curated malls, OpenStreetMap
 //   street-parking.json – where you may park along the street, and where you may not
 //   lot-occupancy.json  – JUDU gated lots: typical free spaces and chance of a space, weekday × hour
+//   scooter-spots.json  – where shared scooters may be left (JUDU), Vilnius Old Town scooter zone
 //   chargers.json       – EV charging points with connectors, power and prices
 
 import fs from "node:fs/promises";
@@ -34,6 +37,8 @@ const SRC = {
   installed: `${JUDU_ORG}/automobiliu_stov%C4%97jimo_vietos_per%C5%BEi%C5%ABra/FeatureServer/0`,
   sidewalk: `${JUDU_ORG}/Stov%C4%97jimo_vietos_ant_saligatvio_Vietos_ant_saligatvio_1/FeatureServer/0`,
   noParking: `${JUDU_ORG}/Draud%C5%BEiamo_stov%C4%97jimo_zona_vie%C5%A1inimui/FeatureServer/0`,
+  scooterSpots: `${JUDU_ORG}/Stov%C4%97jimo_vietos_per%C5%BEi%C5%ABra/FeatureServer/0`,
+  oldTownScooters: `${JUDU_ORG}/Senamiestis_paspirtukai/FeatureServer/0`,
   klaipeda: "https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer/0",
   pr: "https://judu.lt/vairuotojams/statyk-ir-vaziuok-aiksteles/",
   ocpi: "https://ev.vialietuva.lt/ocpi/2.3.0",
@@ -563,7 +568,10 @@ async function streetParking(h, zones, areas, osmStreetAreas) {
       if (!POSITIVE.has(v)) continue;
       const orientation = ORIENTATION[sideTag("orientation")] ?? ORIENTATION[old] ?? null;
       const maxStayMin = parseMaxStay(sideTag("maxstay") ?? t[`parking:condition:${side}:maxstay`] ?? t["parking:condition:both:maxstay"]);
-      segments.push({ src: "osm", line: shifted, name: t.name ?? null, side, orientation, fee: sideTag("fee") ?? null, maxStayMin, zi: zoneAt(m), ai: areaAt(m) });
+      // One-way streets (KET 142: parking on the left is allowed there) and lane count.
+      const oneway = t.oneway === "yes" || t.oneway === "1" ? 1 : t.oneway === "-1" ? -1 : undefined;
+      const lanes = Number.parseInt(t.lanes, 10) || undefined;
+      segments.push({ src: "osm", line: shifted, name: t.name ?? null, side, oneway, lanes, orientation, fee: sideTag("fee") ?? null, maxStayMin, zi: zoneAt(m), ai: areaAt(m) });
     }
   }
 
@@ -896,9 +904,13 @@ export async function buildParking(h) {
   const sizeRest = await writeJson(h, "lots-lt.json", { updated, sources: sources.slice(-1), lots: rest });
   console.log(`  → public/data/lots.json (${main.length} lots, ${size}) + lots-lt.json (${rest.length} OSM lots elsewhere, ${sizeRest}); all: ${bySrc}`);
 
+  await writeStreet(h, updated, zones, areas, osm.streetAreas);
+}
+
+async function writeStreet(h, updated, zones, areas, osmStreetAreas) {
   console.log("  street-side parking…");
-  const street = await streetParking(h, zones, areas, osm.streetAreas);
-  size = await writeJson(h, "street-parking.json", {
+  const street = await streetParking(h, zones, areas, osmStreetAreas);
+  const size = await writeJson(h, "street-parking.json", {
     updated,
     note: "zi – zonos indeksas parking.json › zones; ai – gyventojų leidimų zonos indeksas parking.json › areas",
     sources: [
@@ -912,6 +924,38 @@ export async function buildParking(h) {
   console.log(
     `  → public/data/street-parking.json (${street.segments.length} street pieces, ${street.areas.length} areas, ${street.points.length} sidewalk points, ${street.noParking.length} no-parking pieces, ${street.noZones.length} no-parking zones; ${size})`,
   );
+}
+
+/** Street-side parking alone: zones and resident areas are read back from parking.json. */
+export async function buildStreet(h) {
+  console.log("Street-side parking…");
+  const parking = JSON.parse(await fs.readFile(path.join(h.ROOT, "public", "data", "parking.json"), "utf8"));
+  const osm = await osmLots(h);
+  await writeStreet(h, vilniusDate(), parking.zones, parking.areas ?? [], osm.streetAreas);
+}
+
+// ---------------------------------------------------------------- scooter spots
+
+/** Where shared scooters may be left (JUDU), and the Old Town zone where only those spots are allowed. */
+export async function buildScooterSpots(h) {
+  console.log("Scooter parking spots…");
+  const spots = [];
+  for (const f of await arcgisFeatures(h, SRC.scooterSpots)) {
+    const c = f.geometry?.coordinates;
+    if (!c) continue;
+    spots.push({ pos: [h.round5(c[1]), h.round5(c[0])], addr: f.properties.Adresas ?? null });
+  }
+  const oldTown = (await arcgisFeatures(h, SRC.oldTownScooters)).flatMap((f) => polygonsOf(h, f.geometry, 3));
+  const size = await writeJson(h, "scooter-spots.json", {
+    updated: vilniusDate(),
+    sources: [
+      { name: "JUDU – paspirtukų stovėjimo vietos", url: SRC.scooterSpots },
+      { name: "JUDU – Senamiesčio paspirtukų zona", url: SRC.oldTownScooters },
+    ],
+    spots,
+    oldTown,
+  });
+  console.log(`  → public/data/scooter-spots.json (${spots.length} spots, ${oldTown.length} Old Town polygons; ${size})`);
 }
 
 // ---------------------------------------------------------------- EV chargers

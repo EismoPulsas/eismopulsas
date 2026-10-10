@@ -13,8 +13,10 @@ type Dependencies = { key: () => string | undefined; provider: typeof tomtomRout
 export function createCarRouter(overrides: Partial<Dependencies> = {}) {
   const deps: Dependencies = { key: () => process.env.TOMTOM_API_KEY, provider: tomtomRoute, fallback: osrmRoute, traffic: applyTraffic, weather: weatherFor, ...overrides };
   const pending = new Map<string, Promise<CarLeg | null>>();
-  return async function routeCar(from: LatLng, to: LatLng, depart: Departure): Promise<CarLeg | null> {
-    const identity = JSON.stringify([from, to, depart.isNow ? depart.at.slice(0, 16) : depart.at, depart.isNow]);
+  /** `curb`: arrive with the destination on the kerb side (street parking on that side only). */
+  return async function routeCar(from: LatLng, to: LatLng, depart: Departure, opts: { curb?: boolean } = {}): Promise<CarLeg | null> {
+    const curb = !!opts.curb;
+    const identity = JSON.stringify([from, to, depart.isNow ? depart.at.slice(0, 16) : depart.at, depart.isNow, curb]);
     if (pending.has(identity)) return pending.get(identity)!;
     const start = Date.now();
     const work = (async () => {
@@ -22,13 +24,13 @@ export function createCarRouter(overrides: Partial<Dependencies> = {}) {
       let leg: CarLeg | null = null;
       const key = deps.key();
       if (key) {
-        const result = await deps.provider(from, to, depart, key);
+        const result = await deps.provider(from, to, depart, key, undefined, { curb });
         if (result.status === "unavailable") return null;
         if (result.status === "ok") leg = result.leg;
         else reason = result.reason;
       }
       if (!leg) {
-        const route = await deps.fallback("car", from, to, true);
+        const route = await deps.fallback("car", from, to, true, curb);
         if (!route || !Number.isFinite(route.duration) || route.duration < 0 || !Number.isFinite(route.distance) || route.distance < 0 || route.coords.length < 2 || route.coords.some((p) => !p.every(Number.isFinite))) return null;
         const { extra, info } = await deps.traffic(route.coords, route.segDurations, depart.weekday, depart.sec, depart.isNow);
         const duration = Math.max(0, Math.round(route.duration + extra));

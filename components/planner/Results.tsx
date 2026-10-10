@@ -1,6 +1,6 @@
 "use client";
 
-import { fmtStay, parkingEvals, type ModeId, type ModeSummary, type ParkingEval, type Settings } from "@/lib/metrics";
+import { fmtStay, parkingEvals, type ModeId, type ModeSummary, type OptionId, type ParkingEval, type Settings } from "@/lib/metrics";
 import type { PlanResponse, RideLeg, TransitResult } from "@/lib/plan-types";
 import { fmtClock, fmtCo2, fmtDur, fmtDurShort, fmtEur, fmtKm, fmtNum, MODE_META, ROUTE_TYPE } from "./format";
 import { BusIcon, ChevronIcon, ClockIcon, CoinIcon, FerryIcon, FlameIcon, LeafIcon, ModeBadge, TrolleyIcon, WalkIcon } from "./icons";
@@ -11,15 +11,17 @@ import { localParts } from "@/lib/departure";
 /** Parking choice for the car option, owned by the planner. */
 export type ParkingChoiceProps = { settings: Settings; parkingId: string | null; onParking: (id: string) => void; updating?: boolean; error?: string | null };
 
-type Signal = "go" | "wait" | "stop";
+export type Signal = "go" | "wait" | "stop";
+/** Traffic-light colour per option id for time, price and CO₂. */
+export type Signals = Record<"duration" | "cost" | "co2", Map<string, Signal>>;
 
 /** Green for the best value, red for the worst, amber in between. */
-function signals(modes: ModeSummary[], key: "duration" | "cost" | "co2"): Map<ModeId, Signal> {
+export function signals(modes: { id: string; feasible: boolean; duration: number; cost: number; co2: number }[], key: "duration" | "cost" | "co2"): Map<string, Signal> {
   const ok = modes.filter((m) => m.feasible);
   const vals = ok.map((m) => m[key]);
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
-  const out = new Map<ModeId, Signal>();
+  const out = new Map<string, Signal>();
   for (const m of ok) {
     const v = m[key];
     out.set(m.id, hi - lo < 1e-6 || v - lo <= (hi - lo) * 0.15 ? "go" : v >= hi - (hi - lo) * 0.15 ? "stop" : "wait");
@@ -34,20 +36,29 @@ export function ModeList({
   selected,
   onSelect,
   parking,
+  sig: shared,
+  before,
+  after,
 }: {
   plan: PlanResponse;
   modes: ModeSummary[];
-  best: ModeId | null;
-  selected: ModeId | null;
+  best: OptionId | null;
+  selected: OptionId | null;
   onSelect: (m: ModeId) => void;
   parking: ParkingChoiceProps;
+  /** Signals computed over every option shown (single modes and combinations). */
+  sig?: Signals;
+  /** Cards shown above and below the single modes (car + second-leg combinations). */
+  before?: React.ReactNode;
+  after?: React.ReactNode;
 }) {
-  const sig = { duration: signals(modes, "duration"), cost: signals(modes, "cost"), co2: signals(modes, "co2") };
+  const sig = shared ?? { duration: signals(modes, "duration"), cost: signals(modes, "cost"), co2: signals(modes, "co2") };
   const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
   const sorted = [...modes].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 
   return (
     <div className="flex flex-col gap-2.5">
+      {before}
       {sorted.map((m) => (
         <ModeCard key={m.id} plan={plan} mode={m} isBest={m.id === best} open={m.id === selected} sig={sig} onSelect={() => onSelect(m.id)} parking={parking} />
       ))}
@@ -57,11 +68,12 @@ export function ModeList({
           {plan.transitNote}
         </div>
       )}
+      {after}
     </div>
   );
 }
 
-function Metric({ icon, value, signal, label }: { icon: React.ReactNode; value: string; signal?: Signal; label: string }) {
+export function Metric({ icon, value, signal, label }: { icon: React.ReactNode; value: string; signal?: Signal; label: string }) {
   return (
     <div className="flex min-w-0 items-center gap-1.5" title={label}>
       {signal ? <span className={`signal ${signal}`} aria-hidden /> : <span className="w-2" />}
@@ -85,7 +97,7 @@ function ModeCard({
   mode: ModeSummary;
   isBest: boolean;
   open: boolean;
-  sig: Record<"duration" | "cost" | "co2", Map<ModeId, Signal>>;
+  sig: Signals;
   onSelect: () => void;
   parking: ParkingChoiceProps;
 }) {
@@ -135,7 +147,7 @@ function ModeCard({
   );
 }
 
-function Row({ label, value, muted }: { label: React.ReactNode; value: React.ReactNode; muted?: boolean }) {
+export function Row({ label, value, muted }: { label: React.ReactNode; value: React.ReactNode; muted?: boolean }) {
   return (
     <div className={`flex items-baseline justify-between gap-3 text-sm ${muted ? "text-[var(--muted)]" : ""}`}>
       <span className="min-w-0">{label}</span>
@@ -169,7 +181,7 @@ function Details({ plan, mode: m, parking }: { plan: PlanResponse; mode: ModeSum
                   {l.note && <span className="text-xs text-[var(--muted)]"> · {l.note}</span>}
                 </span>
               }
-              value={l.unknown ? "nežinoma" : `${l.approx ? "≈ " : ""}${fmtEur(l.value)}`}
+              value={l.unknown ? "nežinoma" : `${l.approx ? "≈ " : ""}${fmtEur(l.value)}${l.info ? " *" : ""}`}
             />
           ))}
           {m.costLines.length > 1 && (

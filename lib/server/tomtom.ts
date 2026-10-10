@@ -51,13 +51,14 @@ export function parseTomtom(body: unknown, from: LatLng, to: LatLng, depart: Dep
   };
 }
 
-export async function tomtomRoute(from: LatLng, to: LatLng, depart: Departure, key: string, request: typeof fetch = fetch): Promise<Result> {
+/** `curb`: arrive with the destination on the right-hand (kerb) side, e.g. street parking on one side only. */
+export async function tomtomRoute(from: LatLng, to: LatLng, depart: Departure, key: string, request: typeof fetch = fetch, opts: { curb?: boolean } = {}): Promise<Result> {
   try {
     const res = await request("https://api.tomtom.com/maps/orbis/routing/routes/calculate", {
       method: "POST", cache: "no-store", signal: AbortSignal.timeout(8000),
       headers: { "Content-Type": "application/json", "TomTom-Api-Version": "3", "TomTom-Api-Key": key, Attributes: "routes.summary,routes.legs.path,routes.sections.traffic" },
       body: JSON.stringify({ routePlanningLocations: { origin: { type: "Point", coordinates: [from[1], from[0]] }, destination: { type: "Point", coordinates: [to[1], to[0]] } },
-        departureDateTime: depart.at, traffic: "live", legs: [{ routeType: "fast" }] }),
+        departureDateTime: depart.at, traffic: "live", legs: [{ routeType: "fast" }], ...(opts.curb ? { arrivalSidePreference: "curbSide" } : {}) }),
     });
     if (res.status === 429) return { status: "fallback", reason: "quota" };
     if (res.status === 401 || res.status === 403) return { status: "fallback", reason: "authentication" };

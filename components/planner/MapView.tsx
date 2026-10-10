@@ -8,8 +8,8 @@ import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@maplibre/maplibre-gl-leaflet";
 import { inRing, LT_BOUNDS, type LatLng } from "@/lib/geo";
-import type { ModeId } from "@/lib/metrics";
-import type { Charger, Connector, Lot, PlanResponse, RideLeg } from "@/lib/plan-types";
+import type { OptionId } from "@/lib/metrics";
+import type { Charger, Connector, HybridOption, Lot, PlanResponse, RideLeg, TransitLeg } from "@/lib/plan-types";
 import { fmtClock, MODE_META } from "./format";
 import type { LiveParking } from "./live";
 import { FREE_STREET, LOT_CLASS, lotClass, NO_PARKING, ZONE_COLOR, type Area, type MapPick, type Zone } from "./parking-meta";
@@ -51,6 +51,9 @@ const lotBadge = (color: string, free: number | null) =>
     iconAnchor: [11, 11],
   });
 const SPOT = L.divIcon({ className: "", html: `<div class="ep-lot ep-lot-chosen"><b>P</b></div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+/** Where a car + second-leg trip leaves the car: P, or ⚡ when it charges there. */
+const HUB = (charge: boolean) => L.divIcon({ className: "", html: `<div class="ep-lot ep-lot-chosen"><b>${charge ? "⚡" : "P"}</b></div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+const WALK_LINE = { color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 };
 
 // The stock dark style draws streets barely above the background; lift them so the street grid reads.
 const DARK_ROADS: Record<string, string> = {
@@ -432,6 +435,7 @@ export default function MapView({
   to,
   plan,
   selected,
+  hybrid,
   layers,
   picking,
   live,
@@ -448,7 +452,9 @@ export default function MapView({
   from: LatLng | null;
   to: LatLng | null;
   plan: PlanResponse | null;
-  selected: ModeId | null;
+  selected: OptionId | null;
+  /** The car + second-leg trip being looked at, if a combination is selected. */
+  hybrid?: HybridOption | null;
   layers: Layers;
   picking: boolean;
   live: LiveParking | null;
@@ -492,11 +498,12 @@ export default function MapView({
       if (line) pts.push(...(plan[line]?.geometry ?? []));
       if (selected === "bikeshare" && plan.bikeshare) pts.push(...plan.bikeshare.geometry);
       if (selected === "transit" && plan.transit) for (const l of plan.transit.legs) if (l.kind === "ride") pts.push(...l.geometry);
+      if (hybrid) pts.push(...hybrid.car.geometry, ...hybridPoints(hybrid));
       return { points: pts, nonce: `${plan.from}-${plan.to}-${selected}` };
     }
     const pts = [from, to].filter(Boolean) as LatLng[];
     return { points: pts, nonce: pts.join("|") };
-  }, [plan, selected, from, to]);
+  }, [plan, selected, hybrid, from, to]);
 
   const zoom = view?.zoom ?? 7;
   // The rest of Lithuania's car parks (OSM) load only when looking at somewhere else up close.
@@ -833,27 +840,8 @@ export default function MapView({
             ))}
           </>
         )}
-        {plan?.transit && selected === "transit" &&
-          plan.transit.legs.map((l, i) =>
-            l.kind === "walk" ? (
-              <Polyline key={i} positions={[l.from, l.to]} pathOptions={{ color: "#c9cfdb", weight: 3, dashArray: "2 8", opacity: 0.9 }} />
-            ) : (
-              <Fragment key={i}>
-                <Polyline positions={l.geometry} pathOptions={{ color: "#05060a", weight: 10, opacity: 0.85 }} />
-                <Polyline positions={l.geometry} pathOptions={{ color: l.route.color || "#4b8bff", weight: 6, opacity: 1 }} />
-                {[l.from, l.to].map((s, k) => (
-                  <Marker key={k} position={s.pos} icon={stopIcon(l.route.color || "#4b8bff")}>
-                    <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
-                      <b>{s.name}</b>
-                      <div className="text-xs opacity-80">
-                        {k === 0 ? `Įlipti ${fmtClock(l.dep)}` : `Išlipti ${fmtClock(l.arr)}`} · {l.route.short}
-                      </div>
-                    </Tooltip>
-                  </Marker>
-                ))}
-              </Fragment>
-            ),
-          )}
+        {plan?.transit && selected === "transit" && <TransitLegs legs={plan.transit.legs} />}
+        {plan && hybrid && <HybridRoute h={hybrid} to={plan.to} />}
 
         {/* Where the car is left, and the walk from there to B. */}
         {selected === "car" && parkingSpot && to && (
@@ -969,5 +957,99 @@ function Legend({ parking, charging, zoom, bottom }: { parking: boolean; chargin
         </div>
       )}
     </div>
+  );
+}
+
+/** Rides in their route colours with boarding and alighting stops; walks dotted. */
+function TransitLegs({ legs }: { legs: TransitLeg[] }) {
+  return legs.map((l, i) =>
+    l.kind === "walk" ? (
+      <Polyline key={i} positions={[l.from, l.to]} pathOptions={WALK_LINE} />
+    ) : (
+      <Fragment key={i}>
+        <Polyline positions={l.geometry} pathOptions={{ color: "#05060a", weight: 10, opacity: 0.85 }} />
+        <Polyline positions={l.geometry} pathOptions={{ color: l.route.color || "#4b8bff", weight: 6, opacity: 1 }} />
+        {[l.from, l.to].map((s, k) => (
+          <Marker key={k} position={s.pos} icon={stopIcon(l.route.color || "#4b8bff")}>
+            <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+              <b>{s.name}</b>
+              <div className="text-xs opacity-80">
+                {k === 0 ? `Įlipti ${fmtClock(l.dep)}` : `Išlipti ${fmtClock(l.arr)}`} · {l.route.short}
+              </div>
+            </Tooltip>
+          </Marker>
+        ))}
+      </Fragment>
+    ),
+  );
+}
+
+/** Every point of a combination's second leg, for framing the map. */
+function hybridPoints(h: HybridOption): LatLng[] {
+  const s = h.second;
+  if (s.kind === "transit") return s.transit.legs.flatMap((l) => (l.kind === "ride" ? l.geometry : [l.from, l.to]));
+  if (s.kind === "bikeshare") return [s.bikeshare.from.pos, ...s.bikeshare.geometry, s.bikeshare.to.pos];
+  return [...(s.scooter.vehicle ? [s.scooter.vehicle.pos] : []), ...s.scooter.geometry, ...(s.scooter.endSpot ? [s.scooter.endSpot.pos] : [])];
+}
+
+/** Car + second leg: the drive in car red, the place the car stays, then the rest of the way. */
+function HybridRoute({ h, to }: { h: HybridOption; to: LatLng }) {
+  const s = h.second;
+  const hub = h.hub.navigationPos ?? h.hub.pos;
+  return (
+    <>
+      <Polyline positions={h.car.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+      <Polyline positions={h.car.geometry} pathOptions={{ color: MODE_META.car.color, weight: 5, opacity: 1, dashArray: h.car.geometry.length <= 2 ? "8 8" : undefined }} />
+      {s.kind === "transit" && <TransitLegs legs={s.transit.legs} />}
+      {s.kind === "bikeshare" && (
+        <>
+          <Polyline positions={[hub, s.bikeshare.from.pos]} pathOptions={WALK_LINE} />
+          <Polyline positions={[s.bikeshare.to.pos, to]} pathOptions={WALK_LINE} />
+          <Polyline positions={s.bikeshare.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+          <Polyline positions={s.bikeshare.geometry} pathOptions={{ color: MODE_META.bikeshare.color, weight: 5, opacity: 1 }} />
+          <Marker position={s.bikeshare.from.pos} icon={stopIcon(MODE_META.bikeshare.color)}>
+            <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+              <b>{s.bikeshare.from.name}</b>
+              <div className="text-xs opacity-80">Paimti dviratį · laisvų {s.bikeshare.from.bikes ?? "?"}</div>
+            </Tooltip>
+          </Marker>
+          <Marker position={s.bikeshare.to.pos} icon={stopIcon(MODE_META.bikeshare.color)}>
+            <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+              <b>{s.bikeshare.to.name}</b>
+              <div className="text-xs opacity-80">Palikti · laisvų vietų {s.bikeshare.to.docks ?? "?"}</div>
+            </Tooltip>
+          </Marker>
+        </>
+      )}
+      {s.kind === "scooter" && (
+        <>
+          {s.scooter.vehicle && <Polyline positions={[hub, s.scooter.vehicle.pos]} pathOptions={WALK_LINE} />}
+          {s.scooter.endSpot && <Polyline positions={[s.scooter.endSpot.pos, to]} pathOptions={WALK_LINE} />}
+          <Polyline positions={s.scooter.geometry} pathOptions={{ color: "#05060a", weight: 9, opacity: 0.85 }} />
+          <Polyline positions={s.scooter.geometry} pathOptions={{ color: MODE_META.scooter.color, weight: 5, opacity: 1 }} />
+          {s.scooter.vehicle && (
+            <Marker position={s.scooter.vehicle.pos} icon={stopIcon(MODE_META.scooter.color)}>
+              <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+                <b>{s.scooter.source === "demo" ? "DEMO paspirtukas" : "Paspirtukas"}</b>
+              </Tooltip>
+            </Marker>
+          )}
+          {s.scooter.endSpot && (
+            <Marker position={s.scooter.endSpot.pos} icon={stopIcon(MODE_META.scooter.color)}>
+              <Tooltip className="ep-tooltip" direction="top" offset={[0, -6]}>
+                <b>Palikite paspirtuką</b>
+                <div className="text-xs opacity-80">{s.scooter.endSpot.addr ?? "Paspirtukų stovėjimo vieta"} – Senamiestyje tik pažymėtose vietose</div>
+              </Tooltip>
+            </Marker>
+          )}
+        </>
+      )}
+      <Marker position={hub} icon={HUB(!!h.hub.chargers?.length)} zIndexOffset={500}>
+        <Tooltip className="ep-tooltip" direction="top" offset={[0, -10]}>
+          <b>Paliksite automobilį</b>
+          <div className="text-xs opacity-80">{h.hub.name}</div>
+        </Tooltip>
+      </Marker>
+    </>
   );
 }

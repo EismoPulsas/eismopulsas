@@ -1,5 +1,5 @@
 import { fareOf, type FareLine } from "./fares";
-import type { Charger, ChargerPlug, Connector, LotTariff, ParkingOption, ParkingRule, ParkingZone, PlanResponse, RideLeg } from "./plan-types";
+import type { Charger, ChargerPlug, Connector, HybridOption, LotTariff, ParkingOption, ParkingRule, ParkingZone, PlanResponse, RideLeg, SecondKind } from "./plan-types";
 import { localSecondsAt } from "./departure";
 
 // Money, time, CO₂ and calories for each way of making the trip. Everything here
@@ -70,6 +70,10 @@ export type Settings = {
   /** Shared scooter price: unlock + per minute (no open tariff data, editable). */
   scooterUnlock: number;
   scooterPerMin: number;
+  /** Car + second leg: the ways the user accepts to continue from where the car is left. */
+  hybridModes: SecondKind[];
+  /** EV: prefer leaving the car at a charger when it stands for long. */
+  chargeWhenParked: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -92,6 +96,8 @@ export const DEFAULT_SETTINGS: Settings = {
   priority: "balanced",
   scooterUnlock: 0.5,
   scooterPerMin: 0.15,
+  hybridModes: ["transit", "bikeshare", "scooter"],
+  chargeWhenParked: true,
 };
 
 /** Charging points are shown and counted only for cars that can use them. */
@@ -102,7 +108,8 @@ const hasEvPermit = (s: Settings) => s.fuel === "electric" && s.evPermit;
 export type ModeId = "car" | "transit" | "bikeshare" | "scooter" | "bike" | "walk";
 
 /** `unknown`: the price could not be worked out; `value` is then 0 and must not be shown as a price. */
-export type CostLine = { label: string; value: number; approx?: boolean; unknown?: boolean; note?: string };
+/** `info`: shown for context but not part of the trip's price (e.g. energy charged while parked). */
+export type CostLine = { label: string; value: number; approx?: boolean; unknown?: boolean; note?: string; info?: boolean };
 
 export type ModeSummary = {
   id: ModeId;
@@ -243,8 +250,12 @@ function bestCharge(chargers: Charger[] | undefined, s: Settings, hours: number)
 
 /** Cost, time and chance of a space for one place to leave the car, under this profile. */
 export function evalParking(o: ParkingOption, plan: PlanResponse, s: Settings): ParkingEval {
-  const date = plan.depart.date;
-  let start = plan.car ? localSecondsAt(plan.car.drive.arrivalAt, date) : plan.depart.sec;
+  return evalParkingAt(o, plan.depart.date, plan.car ? localSecondsAt(plan.car.drive.arrivalAt, plan.depart.date) : plan.depart.sec, s);
+}
+
+/** The same for an arrival at `arriveSec` (seconds after local midnight of `date`), e.g. a hybrid trip's hub. */
+export function evalParkingAt(o: ParkingOption, date: string, arriveSec: number, s: Settings): ParkingEval {
+  let start = arriveSec;
   const hours = s.parkingHours;
   const walkSec = Math.round(o.walk / 1.3);
   const base: ParkingEval = { option: o, cost: null, costNote: "", walkSec, searchSec: 0, chance: null, chanceText: null, charge: bestCharge(o.chargers, s, hours), usable: true };
@@ -279,7 +290,12 @@ export function evalParking(o: ParkingOption, plan: PlanResponse, s: Settings): 
     if (!isEv(s)) return { ...base, usable: false, why: "Tik elektromobiliams" };
     if (!base.charge) return { ...base, usable: false, why: "Netinka jūsų automobilio jungtis" };
     base.searchSec = 60;
-    base.costNote = "stovėjimo kaina – pagal vietos taisykles";
+    if (o.zone !== undefined) {
+      // A charging point on the street: the zone's price applies (free with the JUDU EV permit).
+      const z = o.zone ? zoneCost(o.zone, date, start + base.searchSec, hours, s) : { cost: 0, note: "ne mokamoje zonoje" };
+      base.cost = z.cost;
+      base.costNote = z.note;
+    } else base.costNote = "stovėjimo kaina – pagal vietos taisykles";
     return base;
   }
 
@@ -312,7 +328,7 @@ export function evalParking(o: ParkingOption, plan: PlanResponse, s: Settings): 
 }
 
 /** € a minute of the user's time is worth when weighing price against walking ("balanced"). */
-const MINUTE_EUR = { balanced: 0.15, fast: 1, cheap: 0.02, green: 0.15 } satisfies Record<Priority, number>;
+export const MINUTE_EUR = { balanced: 0.15, fast: 1, cheap: 0.02, green: 0.15 } satisfies Record<Priority, number>;
 
 /** The place to leave the car that suits the priority best; never one with an unknown price. */
 export function bestParking(evals: ParkingEval[], p: Priority): ParkingEval | null {
@@ -470,22 +486,29 @@ const WEIGHTS: Record<Priority, { time: number; cost: number; co2: number }> = {
   green: { time: 0.25, cost: 0.15, co2: 0.6 },
 };
 
-/** Weighted score per mode (0 = best on everything); the lowest feasible one wins. */
-export function rank(modes: ModeSummary[], p: Priority): { best: ModeId | null; scores: Map<ModeId, number> } {
+type Rankable = { id: string; feasible: boolean; duration: number; cost: number; co2: number; weatherWarning?: string; rankBias?: number };
+
+/**
+ * Weighted score per option (0 = best on everything); the lowest feasible one wins.
+ * `rankBias` (seconds) only nudges the time used for ranking: a change of vehicle costs
+ * comfort, charging while parked saves a separate stop.
+ */
+export function rank<T extends Rankable>(modes: T[], p: Priority): { best: T["id"] | null; scores: Map<T["id"], number> } {
   const feasible = modes.filter((m) => m.feasible);
   // Bad weather rules riding out, unless nothing else is left.
   const dry = feasible.filter((m) => !m.weatherWarning);
   const ok = dry.length ? dry : feasible;
-  const scores = new Map<ModeId, number>();
+  const scores = new Map<T["id"], number>();
   if (!ok.length) return { best: null, scores };
-  const norm = (key: "duration" | "cost" | "co2", v: number) => {
-    const vals = ok.map((m) => m[key]);
+  const value = (m: T, key: "duration" | "cost" | "co2") => (key === "duration" ? m.duration + (m.rankBias ?? 0) : m[key]);
+  const norm = (key: "duration" | "cost" | "co2", m: T) => {
+    const vals = ok.map((x) => value(x, key));
     const lo = Math.min(...vals);
     const hi = Math.max(...vals);
-    return hi - lo < 1e-9 ? 0 : (v - lo) / (hi - lo);
+    return hi - lo < 1e-9 ? 0 : (value(m, key) - lo) / (hi - lo);
   };
   const w = WEIGHTS[p];
-  for (const m of ok) scores.set(m.id, w.time * norm("duration", m.duration) + w.cost * norm("cost", m.cost) + w.co2 * norm("co2", m.co2));
+  for (const m of ok) scores.set(m.id, w.time * norm("duration", m) + w.cost * norm("cost", m) + w.co2 * norm("co2", m));
   const best = [...scores].sort((a, b) => a[1] - b[1])[0][0];
   return { best, scores };
 }
@@ -512,4 +535,115 @@ export function savingsVsCar(car: ModeSummary, alt: ModeSummary, s: Settings, ca
       trips,
     },
   };
+}
+
+// ---------------------------------------------------------------- car + second leg
+
+export type HybridId = `h:${string}`;
+/** Any card in the comparison: a single mode or a car + second-leg combination. */
+export type OptionId = ModeId | HybridId;
+export const isHybridId = (id: string | null | undefined): id is HybridId => !!id?.startsWith("h:");
+
+export type HybridSummary = Omit<ModeSummary, "id" | "parking"> & {
+  id: HybridId;
+  hybrid: HybridOption;
+  parking: ParkingEval;
+  /** Seconds added (or taken off) only for ranking; see rank(). */
+  rankBias: number;
+};
+
+/** One change of vehicle feels like ~4 minutes (as in the public transport router). */
+export const SWITCH_PENALTY_SEC = 240;
+/** Leaving an EV charging while you work saves a separate charging stop later. */
+export const CHARGE_BONUS_SEC = 600;
+
+const scooterPrice = (rideSec: number, s: Settings) => s.scooterUnlock + Math.ceil(rideSec / 60) * s.scooterPerMin;
+const bikesharePrice = (rideSec: number) => Math.max(0, Math.ceil((rideSec / 60 - BIKESHARE_FREE_MIN) / 30)) * BIKESHARE_EXTRA_PER_30;
+
+/**
+ * Cost, CO₂ and feasibility of each combination under this profile. The car stays at the
+ * hub, so getting back to it (the same second leg in reverse) is part of the price.
+ */
+export function summarizeHybrids(plan: PlanResponse, hybrids: HybridOption[], s: Settings): HybridSummary[] {
+  const out: HybridSummary[] = [];
+  const badWeather = plan.weather?.risk === "bad" ? `Nerekomenduojama: ${plan.weather.reasons.join(", ")}` : undefined;
+  for (const h of hybrids) {
+    if (!s.hybridModes.includes(h.second.kind)) continue;
+    const park = evalParkingAt(h.hub, plan.depart.date, h.parkedAt, s);
+    if (!park.usable || park.cost == null) continue;
+    const km = h.car.distance / 1000;
+    const units = (km * s.consumption) / 100;
+    const lines: CostLine[] = [
+      { label: FUELS[s.fuel].label, value: units * s.fuelPrice, note: `${units.toFixed(1)} ${FUELS[s.fuel].unit}` },
+      { label: `Parkavimas: ${h.hub.name}`, value: park.cost, note: park.costNote },
+    ];
+    let co2 = units * FUELS[s.fuel].co2;
+    let kcal = 0;
+    let distance = h.car.distance;
+    let feasible = s.hasCar;
+    let why: string | undefined = s.hasCar ? undefined : "Profilyje nurodyta, kad automobilio neturite";
+    let weatherWarning: string | undefined;
+    const sec = h.second;
+    if (sec.kind === "transit") {
+      const t = sec.transit;
+      const rides = t.legs.filter((l): l is RideLeg => l.kind === "ride");
+      const fare = fareOf(rides, s);
+      // JUDU P+R: one ticket covers the car park and Vilnius public transport all day.
+      const covered = !!h.hub.lot?.t.flat && rides.every((r) => r.route.fare === "vilnius");
+      if (covered) {
+        lines.push({ label: "VT bilietas", value: 0, note: "įskaičiuotas į P+R bilietą" });
+        lines.push({ label: "Grįžtant iki automobilio", value: 0, note: "P+R bilietas galioja visą dieną" });
+      } else {
+        for (const l of fare.lines) lines.push({ label: l.name, value: l.price, approx: l.approx, note: l.note });
+        lines.push({ label: "Grįžtant iki automobilio", value: fare.total, approx: true, note: "tas pats bilietas atgal" });
+      }
+      co2 += rides.reduce((a, r) => a + (r.distance / 1000) * rideCo2(r), 0);
+      kcal = (t.walkDistance / 1000) * 55;
+      distance += t.rideDistance + t.walkDistance;
+    } else if (sec.kind === "bikeshare") {
+      const b = sec.bikeshare;
+      const price = bikesharePrice(b.rideDuration);
+      lines.push({ label: b.system, value: price, approx: price > 0, note: price ? `${Math.round(b.rideDuration / 60)} min, virš 30 nemokamų` : "pirmos 30 min nemokamai su bilietu (nuo 2,90 € / 3 d.)" });
+      lines.push({ label: "Grįžtant iki automobilio", value: price, approx: true, note: "Cyclocity atgal" });
+      kcal = (b.ride / 1000) * 28 + ((b.walkTo + b.walkFrom) / 1000) * 55;
+      distance += b.walkTo + b.ride + b.walkFrom;
+      if (b.rideDuration > 60 * 60) [feasible, why] = [false, "Per toli dviračiu"];
+      weatherWarning = badWeather;
+    } else {
+      const sc = sec.scooter;
+      const price = scooterPrice(sc.rideDuration, s);
+      const note = `${s.scooterUnlock.toFixed(2)} € + ${Math.ceil(sc.rideDuration / 60)} min × ${s.scooterPerMin.toFixed(2)} €`;
+      lines.push({ label: "Paspirtuko nuoma", value: price, approx: true, note });
+      lines.push({ label: "Grįžtant iki automobilio", value: price, approx: true, note: "paspirtuku atgal" });
+      co2 += (sc.distance / 1000) * SCOOTER_CO2_KM;
+      kcal = (((sc.vehicle?.walk ?? 0) + (sc.endSpot?.walk ?? 0)) / 1000) * 55;
+      distance += sc.distance;
+      if (sc.rideDuration > 45 * 60) [feasible, why] = [false, "Per toli paspirtukui"];
+      weatherWarning = badWeather;
+    }
+    const charge = isEv(s) && s.chargeWhenParked ? park.charge : null;
+    if (charge)
+      lines.push({
+        label: `Įkrovimas ~${charge.kWh} kWh (≈ ${charge.km} km)`,
+        value: charge.cost ?? 0,
+        info: true,
+        note: `${charge.cost == null ? "kaina nežinoma; " : ""}energija kitoms kelionėms – į sumą neįskaičiuota`,
+      });
+    out.push({
+      id: `h:${h.id}`,
+      hybrid: h,
+      duration: h.duration,
+      distance,
+      cost: lines.reduce((a, l) => a + (l.info ? 0 : l.value), 0),
+      costLines: lines,
+      co2,
+      kcal,
+      feasible,
+      why,
+      weatherWarning,
+      parking: { ...park, charge },
+      rankBias: SWITCH_PENALTY_SEC - (charge && charge.kWh >= 10 ? CHARGE_BONUS_SEC : 0),
+    });
+  }
+  return out;
 }

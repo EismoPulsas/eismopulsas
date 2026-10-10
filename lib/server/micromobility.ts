@@ -23,11 +23,19 @@ const inSeason = (date: string) => {
   return m >= 4 && m <= 10;
 };
 
+/** A straight-line stand-in when street routing is unavailable (≈ street distance × 1.3). */
+export function straightRoute(from: LatLng, to: LatLng, speed: number): OsrmRoute {
+  const distance = haversine(from, to) * 1.3;
+  return { distance, duration: distance / speed, coords: [from, to], segDurations: [] };
+}
+
+/** `estimate`: without a street route, ride along a straight-line estimate instead of giving up. */
 export async function planBikeshare(
   from: LatLng,
   to: LatLng,
   date: string,
   isNow: boolean,
+  estimate = false,
 ): Promise<{ result: BikeshareResult | null; note: string | null }> {
   let stations: BikeStation[];
   try {
@@ -55,7 +63,7 @@ export async function planBikeshare(
   if (!a || !b) return { result: null, note: !a ? "Šalia A dabar nėra laisvų Cyclocity dviračių." : "Šalia B dabar nėra laisvų Cyclocity vietų." };
   if (a.s.id === b.s.id) return { result: null, note: null };
 
-  const ride = await osrmRoute("bike", a.s.pos, b.s.pos);
+  const ride = (await osrmRoute("bike", a.s.pos, b.s.pos)) ?? (estimate ? straightRoute(a.s.pos, b.s.pos, RIDE_SPEED) : null);
   if (!ride) return { result: null, note: null };
   const walkTo = Math.round(a.d * 1.3);
   const walkFrom = Math.round(b.d * 1.3);

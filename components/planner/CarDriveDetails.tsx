@@ -38,6 +38,7 @@ export function CarDriveDetails({ leg, parking, searchSec = 0, walkSec = 0, upda
       </p>
       {leg.baseDuration !== null && <div className="flex justify-between gap-3 text-xs text-[var(--muted)]"><span>OSRM pradinis važiavimo laikas</span><span>{fmtDur(leg.baseDuration)}</span></div>}
       {leg.traffic.delaySeconds !== null && <div className="flex justify-between gap-3 text-xs text-[var(--muted)]"><span>Eismo korekcija (jau įskaičiuota)</span><span>{leg.traffic.delaySeconds < 0 ? "−" : "+"}{fmtDur(leg.traffic.delaySeconds)}</span></div>}
+      {parking?.curb && <p className="rounded-lg bg-[var(--chip)] p-2 text-xs">↳ Privažiuosite iš tos pusės, kur stovėjimo vietos – jos bus dešinėje, nereikės kirsti priešpriešinės juostos.</p>}
       <div className="flex justify-between gap-3"><span>Iki automobilio (prielaida)</span><span>+2 min</span></div>
       <div className="flex justify-between gap-3"><span>Vietos paieška (vertinimas)</span><span>+{fmtDur(searchSec)}</span></div>
       <div className="flex justify-between gap-3"><span>Pėsčiomis nuo automobilio</span><span>+{fmtDur(walkSec)}</span></div>

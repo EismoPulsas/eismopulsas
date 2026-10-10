@@ -12,7 +12,8 @@ export function useCarDrive(plan: PlanResponse | null, option: ParkingOption | u
   const target = option ? option.navigationPos ?? option.pos : plan?.to;
   const origin = plan?.from;
   const at = plan?.car?.drive.departureAt;
-  const key = origin && target && at ? JSON.stringify([origin, target, at, refresh, maxWalkMin]) : "";
+  const curb = !!option?.curb;
+  const key = origin && target && at ? JSON.stringify([origin, target, at, refresh, maxWalkMin, curb]) : "";
   const reuse = !!plan?.car && !!target && samePoint(plan.car.drive.to, target);
   useEffect(() => {
     if (!enabled || !plan?.car || !origin || !target || !at || reuse) return;
@@ -20,6 +21,7 @@ export function useCarDrive(plan: PlanResponse | null, option: ParkingOption | u
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       const q = new URLSearchParams({ from: origin.join(","), to: target.join(","), depart: at, parkingFor: plan.to.join(","), walk: String(maxWalkMin) });
+      if (curb) q.set("curb", "1");
       fetch(`/api/drive?${q}`, { signal: ctrl.signal, cache: "no-store" }).then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error ?? "Nepavyko atnaujinti važiavimo laiko.");

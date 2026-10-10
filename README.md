@@ -26,7 +26,16 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
 - **Parkavimas:** „Kur palikti automobilį“ – gatvė prie tikslo, stovėjimas gatvėse, aikštelės (JUDU, UNIPARK, prekybos centrai,
   OpenStreetMap) per jūsų ėjimo atstumą: kaina jūsų stovėjimui, ėjimas, tikimybė rasti vietą (JUDU istorija ir gyvi duomenys);
-  parinkta pagal prioritetą, galima pasirinkti kitą. Elektromobiliams – ir įkrovimo vietos (jungtys, kW, kaina, gyva būsena)
+  parinkta pagal prioritetą, galima pasirinkti kitą. Elektromobiliams – ir įkrovimo vietos (jungtys, kW, kaina, gyva būsena).
+  Kai stovėjimo vietos tik vienoje gatvės pusėje, maršrutas atveda iš tos pusės (TomTom `arrivalSidePreference: curbSide`,
+  OSRM `approaches=curb`; vienos krypties gatvėse kairė pusė leidžiama, KET 142). Waze pasirenka savo maršrutą
+- **Deriniai su automobiliu:** dalį kelio automobiliu, tada VT, Cyclocity ar paspirtuku. Automobilis paliekamas P+R (1 € su VT visai dienai),
+  pigioje ar nemokamoje aikštelėje / gatvėje, elektromobiliui – prie tinkamo įkroviklio, ir visada šalia kitos transporto priemonės
+  (stotelės, Cyclocity stotelės, JUDU paspirtukų vietos). Kaina apima ir grįžimą iki automobilio. Geriausias derinys rodomas sąraše tik
+  kai lenkia važiavimą iki pat tikslo, kiti – „Kiti deriniai“. Senamiestyje paspirtukas paliekamas pažymėtoje vietoje
+- **Kiek stovės automobilis** spėjama, ne klausiama: pagal tai, ką vartotojas pataisė anksčiau šiai vietai ir laikui, kaip ilgai iš tikrųjų
+  stovėjo (vėlesnė kelionė iš tos pačios vietos), kokia tai vieta (biuras ryte – darbo diena, prekybos centras – 2 val.) ir paros laiką.
+  Viskas saugoma tik naršyklėje
 - `/profilis`: automobilis (kuras, sąnaudos, kaina), elektromobilis (jungtys, AC/DC galia, baterija, JUDU leidimas), stovėjimo trukmė,
   didžiausias ėjimas, bilietai, prioritetas – saugoma tik naršyklėje
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
@@ -100,7 +109,7 @@ Tests use deterministic provider/sensor/weather fixtures, including quota/authen
 
 ```bash
 npm run data              # viskas
-npm run data -- transit   # tik dalis: transit | lanes | parking | chargers | border
+npm run data -- transit   # tik dalis: transit | lanes | parking | street | scooters | chargers | border
 ```
 
 Tvarkaraščiai galioja 6 savaites nuo paruošimo dienos (vėlesnei datai imama ta pati savaitės diena), todėl
@@ -130,7 +139,13 @@ GET /api/bikeshare
 GET /api/scooters?bbox=54.66,25.24,54.70,25.32
 GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 GET /api/parking[?chargers=1]
+GET /api/hybrid?from=54.7329,25.2236&to=54.6812,25.2876&depart=2026-10-12T05:00:00Z&car=1320&stay=9[&ev=1&conn=T2,CCS][&prio=cheap][&modes=transit,bikeshare,scooter]
 ```
+
+`/api/hybrid` – vietos palikti automobilį pakeliui ir tolesnė kelionė (iki 5 variantų, ne daugiau kaip 2 kiekvienam būdui). Važiavimas iki jų –
+vienas OSRM `table` užklausimas, padaugintas iš TomTom A → B laiko santykio (`car`), todėl TomTom kvota nenaudojama; kainas ir galutinį
+reitingą skaičiuoja naršyklė (`summarizeHybrids`). `/api/drive?curb=1` – atvykti iš stovėjimo vietų pusės. OSRM atsakymai talpinami 10 min.,
+o serveriams neatsakant jie 30 s neklausiami (deriniai tada naudoja tiesios linijos vertinimą).
 
 `/api/plan` priima ir `walk=10` (didžiausias ėjimas nuo automobilio, min.) ir grąžina `car.parkingOptions`; kainas pagal profilį skaičiuoja naršyklė.
 `/api/parking` – gyvos laisvos vietos JUDU aikštelėse ir (su `chargers=1`) įkrovimo vietų būsena.
@@ -149,7 +164,9 @@ GET /api/parking[?chargers=1]
 - `lib/server/driving.ts`, `tomtom.ts`, `weather.ts` – car-leg orchestration, traffic provider and weather alerts
 - `lib/departure.ts`, `driving.ts` – Lithuanian time conversion, car-leg projection and Waze links
 - `lib/server/osrm.ts`, `lanes.ts` – gatvių maršrutai, A juostos
-- `lib/server/parking.ts` – parkavimo vietos prie B (zonos, gatvės, aikštelės, įkrovimas); `live-parking.ts` – gyvi JUDU ir įkrovimo duomenys
+- `lib/server/parking.ts` – parkavimo vietos prie B (zonos, gatvės, aikštelės, įkrovimas) ir `hubsAround` – kur palikti automobilį pakeliui; `live-parking.ts` – gyvi JUDU ir įkrovimo duomenys
+- `lib/server/hybrid.ts`, `app/api/hybrid` – deriniai su automobiliu; `components/planner/HybridCard.tsx`, `useHybrids.ts` – jų kortelės
+- `lib/stay.ts`, `components/planner/habits.ts` – kiek stovės automobilis (vieta, laikas, įpročiai naršyklėje)
 - `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko maršrutas
 - `lib/server/scooters.ts` – paspirtukų srautas (GBFS arba DEMO)
 - `components/planner/BottomSheet.tsx` – tempiamas rezultatų skydelis telefone
