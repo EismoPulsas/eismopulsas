@@ -117,7 +117,7 @@ export default function About() {
       <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/90 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <Logo />
-          <Link href="/" className="ml-auto rounded-md bg-[var(--marking)] px-3 py-1.5 text-sm font-semibold text-black">
+          <Link href="/" className="ml-auto rounded-md bg-[var(--marking)] px-3 py-1.5 text-sm font-semibold text-white">
             Planuoti kelionę
           </Link>
         </div>

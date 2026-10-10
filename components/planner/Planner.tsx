@@ -5,6 +5,12 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { preconnect } from "react-dom";
 import { inLithuania, type LatLng } from "@/lib/geo";
+import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId } from "@/lib/metrics";
+import type { PlanResponse } from "@/lib/plan-types";
+import { Logo } from "../Logo";
+import { BottomSheet, type Snap } from "./BottomSheet";
+import { MODE_META } from "./format";
+import { ChevronIcon, GearIcon, SwapIcon } from "./icons";
 import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId, type ModeSummary } from "@/lib/metrics";
 import type { PlanResponse, TripWeather } from "@/lib/plan-types";
 import { Logo } from "../Logo";
@@ -16,11 +22,15 @@ import type { Layers } from "./MapView";
 import { ParkingCard } from "./ParkingCard";
 import type { MapPick } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
-import { ModeList } from "./Results";
+import { ModeExtras } from "./Results";
 import { Savings } from "./Savings";
 import { useSettings } from "./settings";
 import { useCarDrive } from "./useCarDrive";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
+import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps, WeatherRow } from "./Trip";
+
+/** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
+const PANEL_LEFT = 24 + 560;
 import { WeatherCard, WeatherChip, WeatherIcon } from "./Weather";
 
 // Leaflet needs `window`, so the map only loads in the browser.
@@ -201,6 +211,13 @@ export default function Planner() {
     setParkingId(null);
   }, [queryKey]);
 
+  // Notices are hints, not state: they go away on their own.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const place = useCallback(async (which: "from" | "to", p: LatLng) => {
     if (!inLithuania(p)) {
       setNotice("Kol kas veikia tik Lietuvoje.");
@@ -241,23 +258,28 @@ export default function Planner() {
     );
   };
 
+  // Picking a way turns on the map layer it needs (parking for the car, stations for Cyclocity…).
+  const MODE_LAYER: Partial<Record<ModeId, keyof Layers>> = { car: "parking", bikeshare: "bikeshare", scooter: "scooters" };
   const selectMode = (m: ModeId) => {
-    setSelected(selected === m ? null : m);
+    setSelected(m);
+    const need = MODE_LAYER[m];
+    if (need && !layers[need]) setLayers({ ...layers, [need]: true });
     if (snap === "peek") setSnap("half");
   };
 
   const best = ranking.best;
   const car = modes.find((m) => m.id === "car");
+  const sel = modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === best) ?? null;
   const collapsed = !!plan && !editing;
 
   return (
-    <div className="relative h-dvh overflow-hidden lg:flex">
-      <main className="absolute inset-0 lg:relative lg:order-2 lg:flex-1" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
+    <div className="relative h-dvh overflow-hidden">
+      <main className="absolute inset-0" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
         <MapView
           from={from?.pos ?? null}
           to={to?.pos ?? null}
           plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
-          selected={selected}
+          selected={sel?.id ?? null}
           layers={layers}
           picking={!!picking || !from || !to}
           live={live}
@@ -265,7 +287,8 @@ export default function Planner() {
           connectors={settings.connectors}
           parkingSpot={carPark && carPark.kind !== "zone" ? { pos: carPark.navigationPos ?? carPark.pos, name: carPark.name } : null}
           picked={picked}
-          padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}
+          padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}
+          onLayers={setLayers}
           onPick={onMapPick}
           onOutside={() => setNotice("Kol kas veikia tik Lietuvoje – pažymėkite tašką šalies viduje.")}
           onMove={(w, p) => place(w, p)}
@@ -274,6 +297,13 @@ export default function Planner() {
             if (phone) setSnap("peek");
           }}
         />
+        {notice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute z-[800] max-w-[min(420px,calc(100%-24px))] -translate-x-1/2 rounded-2xl border border-[#fde68a] bg-[#fffbeb] px-4 py-2.5 text-sm text-[#92400e] shadow-lg"
+            style={{ top: (phone ? topPx : 0) + 60, left: phone ? "50%" : `calc(50% + ${PANEL_LEFT / 2}px)` }}
+          >
+            {notice}
         <LayerToggles layers={layers} onChange={setLayers} ev={ev} top={phone ? topPx : 0} />
         {plan?.weather && (
           <div className="absolute left-2 z-[500] lg:top-3 lg:left-3" style={{ top: phone ? topPx + 8 : undefined }}>
@@ -282,25 +312,37 @@ export default function Planner() {
         )}
         {picked && (
           // On phones the card sits between the search card and the results sheet.
-          <div className="pointer-events-none absolute inset-x-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}>
-            <ParkingCard pick={picked} live={live} settings={settings} onClose={() => setPicked(null)} />
+          <div className="pointer-events-none absolute right-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}>
+            <ParkingCard
+              pick={picked}
+              live={live}
+              settings={settings}
+              onClose={() => setPicked(null)}
+              onGo={(p) => {
+                setPicked(null);
+                place("to", p);
+              }}
+            />
           </div>
         )}
       </main>
 
-      {/* Phones: floating search card + bottom sheet over the map. Desktop: a side column. */}
-      <aside className="asphalt-lg pointer-events-none absolute inset-0 z-[1000] flex flex-col lg:pointer-events-auto lg:relative lg:order-1 lg:w-[460px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-[var(--line)]">
+      {/* Phones: floating search card + bottom sheet over the map. Desktop: one card floating over the map. */}
+      <aside className="pointer-events-none absolute inset-0 z-[1000] flex flex-col lg:pointer-events-auto lg:inset-auto lg:top-6 lg:bottom-6 lg:left-6 lg:w-[560px] lg:overflow-y-auto lg:rounded-[28px] lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
         <div
           ref={topRef}
-          className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--bg)]/95 shadow-2xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
+          className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--panel)]/95 shadow-xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
         >
-          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--bg)]/90 lg:px-4 lg:py-3 lg:backdrop-blur">
+          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur">
             <Logo />
-            <nav className="ml-auto flex items-center gap-1">
-              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+            <span className="ml-auto hidden lg:flex">
+              <LiveStatus departAt={departAt} />
+            </span>
+            <nav className="ml-auto flex items-center gap-1 lg:ml-1">
+              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Profilis
               </Link>
-              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Kaip skaičiuojame
               </Link>
             </nav>
@@ -326,8 +368,8 @@ export default function Planner() {
             </button>
           )}
 
-          <div className={`${collapsed ? "hidden lg:flex" : "flex"} flex-col gap-3 px-3 pb-3 lg:gap-4 lg:p-4`}>
-            <div className="hidden lg:block">
+          <div className={`${collapsed ? "hidden lg:flex" : "flex"} flex-col gap-3 px-3 pb-3 lg:gap-4 lg:px-6 lg:pt-5 lg:pb-2`}>
+            <div className={plan ? "hidden" : "hidden lg:block"}>
               <h1 className="font-display text-[22px] leading-tight font-bold">Kuo važiuoti iš A į B?</h1>
               <p className="mt-1 text-sm text-[var(--muted)]">
                 Palyginkite automobilį, autobusą, dviratį, paspirtuką ir kojas: laiką su spūstimis ir A juostomis, kainą su parkavimu, CO₂.
@@ -335,7 +377,7 @@ export default function Planner() {
             </div>
 
             {/* Route box: A and B joined by a dashed lane line. */}
-            <div className="relative lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:p-3 lg:shadow-xl">
+            <div className="relative lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:p-3 lg:shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
               <div className="flex gap-2">
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <PlaceInput
@@ -392,6 +434,9 @@ export default function Planner() {
                     aria-label="Išvykimo laikas"
                   />
                 )}
+                <span className="ml-auto hidden lg:block">
+                  <NowClock departAt={departAt} />
+                </span>
                 {collapsed === false && plan && (
                   <button type="button" onClick={() => setEditing(false)} className="ml-auto text-sm font-semibold text-[var(--marking)] lg:hidden">
                     Gerai
@@ -399,7 +444,6 @@ export default function Planner() {
                 )}
               </div>
               {picking && <p className="mt-2 text-xs text-[var(--marking)]">Bakstelėkite žemėlapyje, kur yra {picking === "from" ? "A" : "B"} taškas.</p>}
-              {notice && <p className="mt-2 text-xs text-[var(--wait)]">{notice}</p>}
             </div>
           </div>
         </div>
@@ -429,37 +473,63 @@ export default function Planner() {
 
             {plan && (
               <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="eyebrow">Multimodalinė matrica</span>
+                  {best && (
+                    <span className="rounded-full border border-[#a7f3d0] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--marking)]">
+                      Rekomenduojama: {MODE_META[best].short}
+                    </span>
+                  )}
+                </div>
                 {plan.weather && <WeatherCard w={plan.weather} />}
                 <ModeStrip modes={modes} best={best} selected={selected} onSelect={selectMode} weather={plan.weather} />
 
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">Kas svarbiausia?</span>
-                  <div className="seg">
+                <div className="flex items-center gap-2">
+                  <div className="seg flex-1" role="group" aria-label="Kas svarbiausia?">
                     {PRIORITIES.map((p) => (
                       <button key={p.id} type="button" aria-pressed={settings.priority === p.id} onClick={() => setSettings({ ...settings, priority: p.id })}>
                         {p.label}
                       </button>
                     ))}
                   </div>
+                  <button
+                    type="button"
+                    disabled={updatingCar}
+                    onClick={() => setRefresh((v) => v + 1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)] disabled:opacity-50"
+                    title={updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
+                    aria-label="Atnaujinti eismą"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={updatingCar ? "animate-spin" : ""}>
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+                      <path d="M21 3v5h-5" />
+                    </svg>
+                  </button>
                 </div>
 
-                <button type="button" disabled={updatingCar} onClick={() => setRefresh((v) => v + 1)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-sm disabled:opacity-50">
-                  {updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
-                </button>
-                <ModeList
-                  plan={plan}
-                  modes={modes}
-                  best={best}
-                  selected={selected}
-                  onSelect={selectMode}
-                  parking={{ settings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
-                />
+                <ModeMatrix plan={plan} modes={modes} best={best} selected={sel?.id ?? null} onSelect={selectMode} />
+                {!plan.transit && plan.transitNote && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
+
+                {sel && (
+                  <>
+                    <div className="border-t border-[var(--line)]" />
+                    <ImpactTiles modes={modes} sel={sel} />
+                    {sel.feasible && <RouteSteps plan={plan} mode={sel} toLabel={to?.label ?? "B"} />}
+                    <ModeExtras
+                      plan={plan}
+                      mode={sel}
+                      parking={{ settings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
+                    />
+                    <WeatherRow from={plan.from} at={plan.depart.at} mode={sel.id} />
+                    {sel.feasible && <NavButton plan={plan} mode={sel.id} className="lg:hidden" />}
+                  </>
+                )}
 
                 {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={settings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                   Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
-                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap.
+                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap. Orai: meteo.lt.
                   {plan.bikeshareNote && ` ${plan.bikeshareNote}`}
                 </p>
               </>
@@ -490,6 +560,11 @@ export default function Planner() {
             <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
           </div>
         </BottomSheet>
+        {plan && sel?.feasible && (
+          <div className="sticky bottom-0 z-20 mt-auto hidden bg-gradient-to-t from-[var(--panel)] from-60% to-transparent px-6 pt-6 pb-5 lg:block">
+            <NavButton plan={plan} mode={sel.id} />
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -609,7 +684,7 @@ function Intro({ onExample }: { onExample: (e: (typeof EXAMPLES)[number]) => voi
       <ol className="flex flex-col gap-2">
         {steps.map(([n, t]) => (
           <li key={n} className="flex items-center gap-3 text-sm">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-xs font-extrabold text-black">{n}</span>
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-xs font-extrabold text-white">{n}</span>
             {t}
           </li>
         ))}

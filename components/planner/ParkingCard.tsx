@@ -5,7 +5,8 @@ import { fmtStay, isEv, lotCost, zoneCost, type Settings } from "@/lib/metrics";
 import type { Charger, ChargerPlug, Connector, Lot, OccupancyProfile } from "@/lib/plan-types";
 import { fmtEur } from "./format";
 import type { LiveParking } from "./live";
-import { KIND_LABEL, LOT_CLASS, lotClass, SOURCE_LABEL, ZONE_COLOR, type MapPick } from "./parking-meta";
+import type { LatLng } from "@/lib/geo";
+import { bikeStatus, KIND_LABEL, LOT_CLASS, lotClass, NO_PARKING, SOURCE_LABEL, speedStatus, STATUS, ZONE_COLOR, type BikeStation, type MapPick, type Sensor } from "./parking-meta";
 
 type OccupancyFile = { weeks: number; from: string; to: string; lots: Record<string, OccupancyProfile> };
 
@@ -44,9 +45,133 @@ const num = (v: number, d = 2) => v.toFixed(d).replace(".", ",");
 
 function Chip({ children, tone }: { children: React.ReactNode; tone?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-[var(--chip)] px-1.5 py-0.5 text-[11px] text-[var(--ink)]" style={tone ? { boxShadow: `inset 0 0 0 1px ${tone}` } : undefined}>
+    <span className="inline-flex items-center gap-1.5 rounded-full border bg-[var(--panel)] px-2.5 py-0.5 text-xs font-medium text-[var(--ink)]" style={{ borderColor: tone ?? "var(--line)" }}>
       {children}
     </span>
+  );
+}
+
+/** The same disc + glyph as the place's marker on the map, so card and marker read as one thing. */
+function PlaceIcon({ color, glyph, square }: { color: string; glyph: React.ReactNode; square?: boolean }) {
+  return (
+    <span className={`grid h-9 w-9 shrink-0 place-items-center text-white ${square ? "rounded-lg" : "rounded-full"}`} style={{ background: color }}>
+      {glyph}
+    </span>
+  );
+}
+
+const svg = (d: React.ReactNode, fill = false) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill={fill ? "currentColor" : "none"} stroke={fill ? "none" : "currentColor"} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {d}
+  </svg>
+);
+const GLYPH = {
+  P: <b className="font-display text-base">P</b>,
+  bolt: svg(<path d="M13 2 4 14h7l-1 8 9-12h-7z" />, true),
+  bike: svg(
+    <>
+      <circle cx="5.5" cy="17" r="3.5" />
+      <circle cx="18.5" cy="17" r="3.5" />
+      <path d="M5.5 17 9 9h6l3.5 8M9 9 7.5 6H6m9 3-3 8" />
+    </>,
+  ),
+  gauge: svg(
+    <>
+      <path d="M4 18a8 8 0 1 1 16 0" />
+      <path d="m12 18 4-6" />
+    </>,
+  ),
+  no: svg(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m5.6 5.6 12.8 12.8" />
+    </>,
+  ),
+};
+
+function header(pick: MapPick): { color: string; glyph: React.ReactNode; square?: boolean } {
+  switch (pick.type) {
+    case "lot":
+      return { color: LOT_CLASS[lotClass(pick.lot)].color, glyph: GLYPH.P, square: true };
+    case "street":
+      return { color: (pick.zone && ZONE_COLOR[pick.zone.zone]) || (pick.fee === "yes" ? LOT_CLASS.paid.color : STATUS.go), glyph: GLYPH.P, square: true };
+    case "noparking":
+      return { color: NO_PARKING, glyph: GLYPH.no };
+    case "charger":
+      return { color: STATUS.go, glyph: GLYPH.bolt };
+    case "bikeshare":
+      return { color: bikeStatus(pick.station), glyph: GLYPH.bike };
+    case "sensor":
+      return { color: speedStatus(pick.sensor), glyph: GLYPH.gauge };
+  }
+}
+
+/** Where the place is, for "go here"; street pieces are lines, so they have none. */
+function pickPos(pick: MapPick): LatLng | null {
+  switch (pick.type) {
+    case "lot":
+      return pick.lot.pos;
+    case "charger":
+      return pick.charger.pos;
+    case "bikeshare":
+      return pick.station.pos;
+    default:
+      return null;
+  }
+}
+
+/** The headline number of a place, big: free bikes, speed, free spaces. */
+function Headline({ color, children, aside }: { color: string; children: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl border border-[var(--line)] px-3 py-2.5 text-sm" role="status">
+      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="min-w-0 flex-1">{children}</span>
+      {aside && <span className="shrink-0 font-mono text-xs text-[var(--muted)]">{aside}</span>}
+    </div>
+  );
+}
+
+function BikeshareBody({ s }: { s: BikeStation }) {
+  const share = s.capacity ? Math.round((s.bikes / s.capacity) * 100) : 0;
+  return (
+    <>
+      <Headline color={bikeStatus(s)}>
+        {s.open ? (
+          <>
+            <b className="font-mono text-base">{s.bikes}</b> dviračių · <b className="font-mono text-base">{s.docks}</b> laisvų vietų
+          </>
+        ) : (
+          "Stotelė šiuo metu nedirba"
+        )}
+      </Headline>
+      {s.open && s.capacity > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="h-2 overflow-hidden rounded-full bg-[var(--chip)]">
+            <div className="h-full rounded-full" style={{ width: `${share}%`, background: bikeStatus(s) }} />
+          </div>
+          <span className="text-[11px] text-[var(--muted)]">Užpildyta {share} % iš {s.capacity} vietų</span>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        <Chip tone={STATUS.go}>Grąžinti galima į bet kurią stotelę</Chip>
+      </div>
+      <Source>Šaltinis: Cyclocity Vilnius (JCDecaux), GBFS – atnaujinama kas minutę.</Source>
+    </>
+  );
+}
+
+function SensorBody({ s }: { s: Sensor }) {
+  return (
+    <>
+      <Headline color={speedStatus(s)} aside={s.road}>
+        Vid. greitis <b className="font-mono text-base">{s.speed} km/h</b>
+        {s.limit ? <span className="text-[var(--muted)]"> · leidžiama {s.limit}</span> : null}
+      </Headline>
+      <p className="text-sm">
+        Per 15 min pravažiavo <b className="font-mono">{s.vehicles}</b> automobilių.
+      </p>
+      <Source>Šaltinis: Via Lietuva, eismoinfo.lt – kelių jutikliai, matavimai kas 15 min.</Source>
+    </>
   );
 }
 
@@ -76,7 +201,8 @@ function StayCost({ cost, hours, note }: { cost: number | null; hours: number; n
   );
 }
 
-export function ParkingCard({ pick, live, settings, onClose }: { pick: MapPick; live: LiveParking | null; settings: Settings; onClose: () => void }) {
+/** One card for anything clicked on the map: car park, street piece, charger, Cyclocity station, road sensor. */
+export function ParkingCard({ pick, live, settings, onClose, onGo }: { pick: MapPick; live: LiveParking | null; settings: Settings; onClose: () => void; onGo?: (p: LatLng) => void }) {
   const now = vilniusNow();
   const title =
     pick.type === "lot"
@@ -85,14 +211,21 @@ export function ParkingCard({ pick, live, settings, onClose }: { pick: MapPick; 
         ? (pick.name ?? "Stovėjimas gatvėje")
         : pick.type === "noparking"
           ? "Stovėti draudžiama"
-          : pick.charger.name;
+          : pick.type === "charger"
+            ? pick.charger.name
+            : pick.type === "bikeshare"
+              ? pick.station.name
+              : pick.sensor.name;
+  const icon = header(pick);
+  const pos = pickPos(pick);
   return (
     <div
       role="dialog"
       aria-label={title}
-      className="pointer-events-auto absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]/97 shadow-2xl backdrop-blur sm:w-[360px]"
+      className="pointer-events-auto absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-[20px] border border-[var(--line)] bg-[var(--panel)] shadow-[0_20px_50px_rgba(15,23,42,0.2)] sm:w-[360px]"
     >
-      <div className="flex items-start gap-2 p-3 pb-2">
+      <div className="flex items-start gap-3 p-3.5 pb-2.5">
+        <PlaceIcon {...icon} />
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-[15px] leading-tight font-bold">{title}</h2>
           {pick.type === "lot" && (pick.lot.addr || pick.lot.city) && (
@@ -100,6 +233,8 @@ export function ParkingCard({ pick, live, settings, onClose }: { pick: MapPick; 
           )}
           {pick.type === "street" && <p className="mt-0.5 text-xs text-[var(--muted)]">{pick.what}</p>}
           {pick.type === "charger" && <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{[pick.charger.address, pick.charger.city].filter(Boolean).join(", ")}</p>}
+          {pick.type === "bikeshare" && <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{pick.station.address || "Cyclocity stotelė"}</p>}
+          {pick.type === "sensor" && <p className="mt-0.5 truncate text-xs text-[var(--muted)]">Eismo jutiklis · {pick.sensor.road}</p>}
         </div>
         <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)]" aria-label="Uždaryti">
           ✕
@@ -117,7 +252,20 @@ export function ParkingCard({ pick, live, settings, onClose }: { pick: MapPick; 
           </>
         )}
         {pick.type === "charger" && <ChargerBody c={pick.charger} live={live} settings={settings} />}
+        {pick.type === "bikeshare" && <BikeshareBody s={pick.station} />}
+        {pick.type === "sensor" && <SensorBody s={pick.sensor} />}
       </div>
+      {pos && onGo && (
+        <div className="border-t border-[var(--line)] p-3">
+          <button
+            type="button"
+            onClick={() => onGo(pos)}
+            className="w-full rounded-xl bg-[var(--marking)] py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+          >
+            Važiuoti čia (B)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
