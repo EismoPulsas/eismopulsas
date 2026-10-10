@@ -362,6 +362,25 @@ function shapeOf(N: Net, i: number): LatLng[] | undefined {
   return (N.shapes[i] ??= decodePolyline(N.raw.shapes[i]));
 }
 
+/** Closest point to p on segments lo…hi-1 of a line (segment i runs from vertex i to i+1). */
+function project(line: LatLng[], p: LatLng, lo: number, hi: number): { seg: number; point: LatLng } {
+  const kx = Math.cos((p[0] * Math.PI) / 180);
+  let best = { seg: lo, point: line[lo], d: Infinity };
+  for (let i = lo; i < Math.max(hi, lo + 1) && i + 1 < line.length; i++) {
+    const [ay, ax] = line[i];
+    const [by, bx] = line[i + 1];
+    const dx = (bx - ax) * kx;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? (((p[1] - ax) * kx) * dx + (p[0] - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const point: LatLng = [ay + t * (by - ay), ax + t * (bx - ax)];
+    const d = ((point[0] - p[0]) ** 2) + ((point[1] - p[1]) * kx) ** 2;
+    if (d < best.d) best = { seg: i, point, d };
+  }
+  return { seg: best.seg, point: best.point };
+}
+
 function rideLeg(N: Net, lab: Extract<Label, { ride: true }>): RideLeg {
   const p = N.patterns[lab.pattern];
   const r = N.raw.routes[p.route];
@@ -373,8 +392,13 @@ function rideLeg(N: Net, lab: Extract<Label, { ride: true }>): RideLeg {
   const shape = shapeOf(N, p.shape);
   let geometry: LatLng[];
   if (shape && p.cut) {
-    geometry = shape.slice(p.cut[lab.board], p.cut[lab.alight] + 1);
-    geometry = [stopPos(N, fromStop), ...geometry, stopPos(N, toStop)];
+    // Cut the line exactly where the stops project onto it. Cutting at the nearest
+    // vertex can overshoot a stop and draw a spur out and back.
+    const cb = p.cut[lab.board];
+    const ca = p.cut[lab.alight];
+    const a = project(shape, stopPos(N, fromStop), Math.max(0, cb - 2), Math.min(shape.length - 1, cb + 2));
+    const b = project(shape, stopPos(N, toStop), Math.max(a.seg, ca - 2), Math.min(shape.length - 1, ca + 2));
+    geometry = b.seg > a.seg ? [a.point, ...shape.slice(a.seg + 1, b.seg + 1), b.point] : [a.point, b.point];
   } else {
     geometry = [];
     for (let i = lab.board; i <= lab.alight; i++) geometry.push(stopPos(N, p.stops[i]));

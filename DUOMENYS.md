@@ -4,7 +4,8 @@
 |---|---|
 | Gyvas eismo greitis kelių jutikliuose | Via Lietuva, eismoinfo.lt: `https://eismoinfo.lt/traffic-intensity-service` |
 | Dviračių nuomos stotelės, laisvi dviračiai ir vietos | Cyclocity Vilnius (JCDecaux), GBFS: `https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/` |
-| Automobilio, dviračio ir pėsčiųjų maršrutai | OSRM (FOSSGIS): `https://routing.openstreetmap.de` |
+| Dviračio, paspirtuko ir pėsčiųjų maršrutai | Valhalla (FOSSGIS): `https://valhalla1.openstreetmap.de/route` |
+| Ėjimas iki stotelių / tarp jų, atsarginiai maršrutai | OSRM (FOSSGIS): `https://routing.openstreetmap.de` |
 | Adresų paieška | Photon (komoot, OpenStreetMap): `https://photon.komoot.io/api/`; atsarginis – Nominatim: `https://nominatim.openstreetmap.org` |
 | VT stotelių paieška | iš LTSA GTFS (`data/transit.json.gz`) |
 | Paspirtukai | bet koks operatoriaus GBFS srautas per `SCOOTER_GBFS_URL`; kol jo nėra – DEMO duomenys tik dev / preview aplinkose |

@@ -2,8 +2,9 @@ import "server-only";
 import { haversine, type LatLng } from "../geo";
 import type { BikeshareResult, ScooterResult } from "../plan-types";
 import { bikeStations, type BikeStation } from "./bikeshare";
-import { osrmRoute, type OsrmRoute } from "./osrm";
+import type { OsrmRoute } from "./osrm";
 import { nearestScooter, type Fleet } from "./scooters";
+import { bikeRoute, walkPath } from "./streets";
 
 // Shared bikes and e-scooters.
 //
@@ -12,7 +13,6 @@ import { nearestScooter, type Fleet } from "./scooters";
 // for Lithuania (Bolt's public GBFS covers only a handful of cities abroad), so
 // scooters are an estimate: typical speed, time to find one, typical price.
 
-const WALK = 1.25 / 1.3; // m/s along streets ≈ straight line / 1.3
 const RIDE_SPEED = 16 / 3.6;
 const SCOOTER_SPEED = 17 / 3.6; // 25 km/h cap, crossings and pavements in between
 const MAX_WALK = 900;
@@ -36,6 +36,8 @@ export async function planBikeshare(
   date: string,
   isNow: boolean,
   estimate = false,
+  /** false: skip street routing for the walks (car + bike combinations try many hubs). */
+  streets = true,
 ): Promise<{ result: BikeshareResult | null; note: string | null }> {
   let stations: BikeStation[];
   try {
@@ -63,22 +65,28 @@ export async function planBikeshare(
   if (!a || !b) return { result: null, note: !a ? "Šalia A dabar nėra laisvų Cyclocity dviračių." : "Šalia B dabar nėra laisvų Cyclocity vietų." };
   if (a.s.id === b.s.id) return { result: null, note: null };
 
-  const ride = (await osrmRoute("bike", a.s.pos, b.s.pos)) ?? (estimate ? straightRoute(a.s.pos, b.s.pos, RIDE_SPEED) : null);
+  const straightWalk = (p: LatLng, q: LatLng) => {
+    const d = Math.round(haversine(p, q) * 1.3);
+    return Promise.resolve({ distance: d, duration: Math.round(d / 1.25), coords: [p, q] as LatLng[], routed: false });
+  };
+  const walk = streets ? walkPath : straightWalk;
+  const [routed, walkA, walkB] = await Promise.all([bikeRoute(a.s.pos, b.s.pos), walk(from, a.s.pos), walk(b.s.pos, to)]);
+  const ride = routed ?? (estimate ? straightRoute(a.s.pos, b.s.pos, RIDE_SPEED) : null);
   if (!ride) return { result: null, note: null };
-  const walkTo = Math.round(a.d * 1.3);
-  const walkFrom = Math.round(b.d * 1.3);
   const rideTime = Math.max(ride.duration, ride.distance / RIDE_SPEED);
   return {
     result: {
       system: "Cyclocity Vilnius",
       from: { name: a.s.name, pos: a.s.pos, bikes: a.s.bikes },
       to: { name: b.s.name, pos: b.s.pos, docks: b.s.docks },
-      walkTo,
-      walkFrom,
+      walkTo: walkA.distance,
+      walkFrom: walkB.distance,
+      walkToGeometry: walkA.coords,
+      walkFromGeometry: walkB.coords,
       ride: Math.round(ride.distance),
       rideDuration: Math.round(rideTime),
       // Walk, take a bike (1 min), ride, dock it (1 min), walk.
-      duration: Math.round(a.d / WALK + 60 + rideTime + 60 + b.d / WALK),
+      duration: Math.round(walkA.duration + 60 + rideTime + 60 + walkB.duration),
       geometry: ride.coords,
       live: isNow,
       updated: null,
@@ -100,27 +108,40 @@ const SCOOTER_TOWNS: { name: string; c: LatLng; r: number }[] = [
   { name: "Druskininkai", c: [54.0167, 23.9667], r: 4000 },
 ];
 
-export function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet): ScooterResult | null {
+export async function estimateScooter(from: LatLng, to: LatLng, bike: OsrmRoute | null, fleet: Fleet): Promise<ScooterResult | null> {
   if (!bike) return null;
-  const rideDuration = Math.round(bike.distance / SCOOTER_SPEED);
-  const base = { distance: Math.round(bike.distance), rideDuration, geometry: bike.coords, operator: fleet.operator };
 
   if (fleet.source !== "none") {
-    // Known fleet: walk to the nearest free scooter, unlock (30 s), ride, park (1 min).
+    // Known fleet: walk to the nearest free scooter, unlock (30 s), ride from there, park (1 min).
     const v = nearestScooter(fleet, from);
     if (!v) return null;
-    const walk = Math.round(v.distance * 1.3);
+    const [walk, ride] = await Promise.all([walkPath(from, v.pos), v.distance > 100 ? bikeRoute(v.pos, to) : bike]);
+    const r = ride ?? bike;
+    const rideDuration = Math.round(r.distance / SCOOTER_SPEED);
     return {
-      ...base,
+      distance: Math.round(r.distance),
+      rideDuration,
+      geometry: r.coords,
+      operator: fleet.operator,
       city: null,
       source: fleet.source,
-      vehicle: { id: v.id, pos: v.pos, battery: v.battery, walk },
-      duration: Math.round(walk / 1.25) + 30 + rideDuration + 60,
+      vehicle: { id: v.id, pos: v.pos, battery: v.battery, walk: walk.distance, walkGeometry: walk.coords },
+      duration: walk.duration + 30 + rideDuration + 60,
     };
   }
 
   const town = SCOOTER_TOWNS.find((t) => haversine(from, t.c) <= t.r && haversine(to, t.c) <= t.r);
   if (!town) return null;
+  const rideDuration = Math.round(bike.distance / SCOOTER_SPEED);
   // ≈ 3 min to walk to the nearest scooter and unlock it, 1 min to park.
-  return { ...base, city: town.name, source: "estimate", vehicle: null, duration: 180 + rideDuration + 60 };
+  return {
+    distance: Math.round(bike.distance),
+    rideDuration,
+    geometry: bike.coords,
+    operator: fleet.operator,
+    city: town.name,
+    source: "estimate",
+    vehicle: null,
+    duration: 180 + rideDuration + 60,
+  };
 }

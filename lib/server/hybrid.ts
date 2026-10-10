@@ -233,7 +233,7 @@ async function buildOption(
     const rides = t.legs.filter((l) => l.kind === "ride").length;
     if (rides > 1) extra += (rides - 1) * SWITCH_PENALTY_SEC;
   } else if (c.kind === "bikeshare") {
-    const { result } = await planBikeshare(c.hub.pos, to, depart.date, depart.isNow, true);
+    const { result } = await planBikeshare(c.hub.pos, to, depart.date, depart.isNow, true, false);
     if (!result || result.walkTo > 350 * DETOUR) return null;
     walk = result.walkTo;
     second = { kind: "bikeshare", bikeshare: { ...result, geometry: simplify(result.geometry, 8) } };
@@ -243,7 +243,7 @@ async function buildOption(
     const end = inOldTown(to) ? spotNear(to, 400) : null;
     const target = end?.pos ?? to;
     const ride = (await osrmRoute("bike", c.hub.pos, target)) ?? straightRoute(c.hub.pos, target, 16 / 3.6);
-    const sc: ScooterResult | null = estimateScooter(c.hub.pos, target, ride, fleet);
+    const sc: ScooterResult | null = await estimateScooter(c.hub.pos, target, ride, fleet);
     if (!sc) return null;
     const endWalk = end ? Math.round(end.distance * DETOUR) : 0;
     walk = sc.vehicle?.walk ?? Math.round(c.access * DETOUR);

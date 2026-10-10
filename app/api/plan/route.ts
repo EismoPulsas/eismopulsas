@@ -12,10 +12,10 @@ import { parsePoint } from "@/lib/driving";
 import type { CarResult, PlanResponse } from "@/lib/plan-types";
 import { liveLots } from "@/lib/server/live-parking";
 import { estimateScooter, planBikeshare } from "@/lib/server/micromobility";
-import { osrmRoute } from "@/lib/server/osrm";
 import { scooterFleet } from "@/lib/server/scooters";
 import { parkingNear, parkingZoneAt } from "@/lib/server/parking";
 import { routeCar } from "@/lib/server/driving";
+import { bikeRoute, footRoute, routeTransitWalks } from "@/lib/server/streets";
 import { planTransit, resolveDay, timetableInfo } from "@/lib/server/transit";
 import { tripWeather } from "@/lib/server/weather";
 
@@ -37,14 +37,14 @@ export async function GET(req: Request) {
 
   const [drive, bike, walk, share, fleet, weather] = await Promise.all([
     routeCar(from, to, carDeparture(depart)),
-    straight < 80_000 ? osrmRoute("bike", from, to) : null,
-    straight < 25_000 ? osrmRoute("foot", from, to) : null,
+    straight < 80_000 ? bikeRoute(from, to) : null,
+    straight < 25_000 ? footRoute(from, to) : null,
     straight < 20_000 ? planBikeshare(from, to, depart.date, depart.isNow) : { result: null, note: null },
     scooterFleet(),
     // A city trip takes well under an hour; the forecast covers the first hour or so.
     tripWeather(from, Date.parse(depart.at), Math.min(3 * 3600, straight / 4)),
   ]);
-  const scooter = straight < 20_000 ? estimateScooter(from, to, bike, fleet) : null;
+  const scooter = straight < 20_000 ? await estimateScooter(from, to, bike, fleet) : null;
 
   let car: CarResult | null = null;
   if (drive) {
@@ -77,6 +77,8 @@ export async function GET(req: Request) {
   if (straight < 400) transitNote = "Per arti viešajam transportui – geriau eiti pėsčiomis.";
   else {
     transit = planTransit(from, to, day, depart.sec);
+    // Walks to, between and from stops along streets instead of straight lines.
+    if (transit) transit = await routeTransitWalks(transit);
     if (!transit) transitNote = "Šiuo metu tinkamo viešojo transporto reiso nerasta (gal per vėlu arba šalia nėra stotelių).";
   }
 

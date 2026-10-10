@@ -80,10 +80,16 @@ const SOURCES = [
     use: "Visos Lietuvos įkrovimo vietos: jungtys, galia, kainos ir gyva būsena (OCPI 2.3.0).",
   },
   {
+    name: "Dviračio ir pėsčiųjų maršrutai",
+    who: "Valhalla (FOSSGIS) pagal OpenStreetMap",
+    url: "https://valhalla1.openstreetmap.de/",
+    use: "Dviračio, paspirtuko ir pėsčiųjų maršrutai – renkasi dviračių takus ir nedaro lankų.",
+  },
+  {
     name: "Gatvių maršrutai",
     who: "OSRM (FOSSGIS) pagal OpenStreetMap",
     url: "https://routing.openstreetmap.de/",
-    use: "Dviračio, pėsčiųjų ir atsarginiai automobilio maršrutai bei pradinis važiavimo laikas.",
+    use: "Ėjimas iki stotelių ir tarp jų, atsarginiai dviračio, pėsčiųjų ir automobilio maršrutai.",
   },
   {
     name: "Adresų paieška",
@@ -111,7 +117,7 @@ export default function About() {
       <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/90 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <Logo />
-          <Link href="/" className="ml-auto rounded-md bg-[var(--marking)] px-3 py-1.5 text-sm font-semibold text-black">
+          <Link href="/" className="ml-auto rounded-md bg-[var(--marking)] px-3 py-1.5 text-sm font-semibold text-white">
             Planuoti kelionę
           </Link>
         </div>
@@ -172,7 +178,12 @@ export default function About() {
               rodomi aiškiai pažymėti <b>DEMO</b> paspirtukai, o tikrojoje – vertinimas (≈ 3 min. rasti paspirtuką).
             </li>
             <li>
-              <b>Dviratis ir pėsčiomis:</b> OSRM dviračio ir pėsčiųjų profiliai. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
+              <b>Dviratis ir pėsčiomis:</b> Valhalla dviračio („hibridinis“ dviratis, renkasi dviračių takus ir ramesnes gatves) ir pėsčiųjų maršrutai; jei
+              Valhalla neatsako – OSRM. Ilgesnės nei 75 min. (dviračiu) ar 50 min. (pėsčiomis) kelionės nelaikomos rimta alternatyva.
+            </li>
+            <li>
+              <b>Ėjimas iki stotelės, persėdimai, iki Cyclocity stotelės ar paspirtuko</b> – gatvėmis (OSRM pėsčiųjų profilis), ne tiesia linija. Jei kelias gatvėmis
+              ilgesnis, išeiti reikia anksčiau, o persėdimas, kurio nespėtumėte ramiai nueiti, pažymimas.
             </li>
           </ul>
         </section>

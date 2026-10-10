@@ -5,28 +5,44 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { preconnect } from "react-dom";
 import { inLithuania, type LatLng } from "@/lib/geo";
-import { bestParking, DEFAULT_SETTINGS, isEv, isHybridId, parkingEvals, rank, summarize, summarizeHybrids, type HybridSummary, type ModeId, type ModeSummary, type OptionId } from "@/lib/metrics";
+import {
+  bestParking,
+  DEFAULT_SETTINGS,
+  isEv,
+  isHybridId,
+  parkingEvals,
+  rank,
+  summarize,
+  summarizeHybrids,
+  type HybridSummary,
+  type ModeId,
+  type ModeSummary,
+  type OptionId,
+} from "@/lib/metrics";
 import { estimateStay, type StayEstimate } from "@/lib/stay";
-import type { PlanResponse, TripWeather } from "@/lib/plan-types";
+import type { PlanResponse } from "@/lib/plan-types";
 import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
-import { fmtClock, fmtDurShort, fmtEur, MODE_META, MODE_TAB } from "./format";
-import { ChevronIcon, GearIcon, LayersIcon, ModeBadge, SwapIcon } from "./icons";
+import { fmtClock, MODE_META } from "./format";
+import { ChevronIcon, GearIcon, SwapIcon } from "./icons";
 import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
 import { ParkingCard } from "./ParkingCard";
 import type { MapPick } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
-import { ModeList } from "./Results";
+import { HybridCard, hybridTitle, MoreHybrids, StayLine } from "./HybridCard";
+import { usualTrip, useHabits } from "./habits";
+import { ModeExtras, signals, type Signals } from "./Results";
 import { Savings } from "./Savings";
 import { useSettings } from "./settings";
 import { useCarDrive } from "./useCarDrive";
-import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
-import { WeatherCard, WeatherChip, WeatherIcon } from "./Weather";
-import { HybridCard, HybridChip, MoreHybrids, StayLine } from "./HybridCard";
-import { usualTrip, useHabits } from "./habits";
-import { signals, type Signals } from "./Results";
 import { useHybrids } from "./useHybrids";
+import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
+import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps } from "./Trip";
+import { WeatherCard } from "./Weather";
+
+/** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
+const PANEL_LEFT = 24 + 560;
 
 // Leaflet needs `window`, so the map only loads in the browser.
 const MapView = dynamic(() => import("./MapView"), {
@@ -208,7 +224,7 @@ export default function Planner() {
     const all = [...modes, ...hybrids];
     return { duration: signals(all, "duration"), cost: signals(all, "cost"), co2: signals(all, "co2") };
   }, [modes, hybrids]);
-  // The best combination joins the list only when it beats driving all the way; the rest fold away.
+  // The best combination is shown first only when it beats driving all the way; the rest fold away.
   const hybridOrder = useMemo(() => [...hybrids].sort((a, b) => (ranking.scores.get(a.id) ?? Infinity) - (ranking.scores.get(b.id) ?? Infinity)), [hybrids, ranking]);
   const carScore = ranking.scores.get("car");
   const topHybrid = hybridOrder[0] && ranking.scores.has(hybridOrder[0].id) && (carScore === undefined || ranking.scores.get(hybridOrder[0].id)! < carScore) ? hybridOrder[0] : null;
@@ -230,6 +246,13 @@ export default function Planner() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setParkingId(null);
   }, [queryKey]);
+
+  // Notices are hints, not state: they go away on their own.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const place = useCallback(async (which: "from" | "to", p: LatLng) => {
     if (!inLithuania(p)) {
@@ -271,8 +294,12 @@ export default function Planner() {
     );
   };
 
+  // Picking a way turns on the map layer it needs (parking for the car, stations for Cyclocity…).
+  const MODE_LAYER: Partial<Record<ModeId, keyof Layers>> = { car: "parking", bikeshare: "bikeshare", scooter: "scooters" };
   const selectMode = (m: OptionId) => {
-    setSelected(selected === m ? null : m);
+    setSelected(m);
+    const need = isHybridId(m) ? undefined : MODE_LAYER[m];
+    if (need && !layers[need]) setLayers({ ...layers, [need]: true });
     if (snap === "peek") setSnap("half");
     const opt = [...modes, ...hybrids].find((x) => x.id === m);
     if (plan && from && to && opt && selected !== m)
@@ -293,17 +320,20 @@ export default function Planner() {
 
   // The badge waits for combinations (≤ 2,5 s) so it does not jump from one card to another.
   const best = hybridState.settled ? ranking.best : null;
+  const bestMode = isHybridId(best) ? null : best;
+  const bestHybrid = isHybridId(best) ? hybrids.find((h) => h.id === best) : undefined;
   const car = modes.find((m) => m.id === "car");
+  const sel = isHybridId(selected) ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === bestMode) ?? null);
   const collapsed = !!plan && !editing;
 
   return (
-    <div className="relative h-dvh overflow-hidden lg:flex">
-      <main className="absolute inset-0 lg:relative lg:order-2 lg:flex-1" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
+    <div className="relative h-dvh overflow-hidden">
+      <main className="absolute inset-0" style={{ "--map-bottom": `${sheetPx}px` } as React.CSSProperties}>
         <MapView
           from={from?.pos ?? null}
           to={to?.pos ?? null}
           plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
-          selected={selected}
+          selected={selectedHybrid?.id ?? sel?.id ?? null}
           hybrid={selectedHybrid?.hybrid ?? null}
           layers={layers}
           picking={!!picking || !from || !to}
@@ -312,7 +342,8 @@ export default function Planner() {
           connectors={settings.connectors}
           parkingSpot={carPark && carPark.kind !== "zone" ? { pos: carPark.navigationPos ?? carPark.pos, name: carPark.name } : null}
           picked={picked}
-          padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}
+          padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}
+          onLayers={setLayers}
           onPick={onMapPick}
           onOutside={() => setNotice("Kol kas veikia tik Lietuvoje – pažymėkite tašką šalies viduje.")}
           onMove={(w, p) => place(w, p)}
@@ -321,33 +352,48 @@ export default function Planner() {
             if (phone) setSnap("peek");
           }}
         />
-        <LayerToggles layers={layers} onChange={setLayers} ev={ev} top={phone ? topPx : 0} />
-        {plan?.weather && (
-          <div className="absolute left-2 z-[500] lg:top-3 lg:left-3" style={{ top: phone ? topPx + 8 : undefined }}>
-            <WeatherChip w={plan.weather} />
+        {notice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute z-[800] max-w-[min(420px,calc(100%-24px))] -translate-x-1/2 rounded-2xl border border-[#fde68a] bg-[#fffbeb] px-4 py-2.5 text-sm text-[#92400e] shadow-lg"
+            style={{ top: (phone ? topPx : 0) + 60, left: phone ? "50%" : `calc(50% + ${PANEL_LEFT / 2}px)` }}
+          >
+            {notice}
           </div>
         )}
         {picked && (
           // On phones the card sits between the search card and the results sheet.
-          <div className="pointer-events-none absolute inset-x-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0 }}>
-            <ParkingCard pick={picked} live={live} settings={settings} onClose={() => setPicked(null)} />
+          <div className="pointer-events-none absolute right-0 z-[600]" style={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}>
+            <ParkingCard
+              pick={picked}
+              live={live}
+              settings={settings}
+              onClose={() => setPicked(null)}
+              onGo={(p) => {
+                setPicked(null);
+                place("to", p);
+              }}
+            />
           </div>
         )}
       </main>
 
-      {/* Phones: floating search card + bottom sheet over the map. Desktop: a side column. */}
-      <aside className="asphalt-lg pointer-events-none absolute inset-0 z-[1000] flex flex-col lg:pointer-events-auto lg:relative lg:order-1 lg:w-[460px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-[var(--line)]">
+      {/* Phones: floating search card + bottom sheet over the map. Desktop: one card floating over the map. */}
+      <aside className="pointer-events-none absolute inset-0 z-[1000] flex flex-col lg:pointer-events-auto lg:inset-auto lg:top-6 lg:bottom-6 lg:left-6 lg:w-[560px] lg:overflow-y-auto lg:rounded-[28px] lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
         <div
           ref={topRef}
-          className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--bg)]/95 shadow-2xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
+          className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--panel)]/95 shadow-xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
         >
-          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--bg)]/90 lg:px-4 lg:py-3 lg:backdrop-blur">
+          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur">
             <Logo />
-            <nav className="ml-auto flex items-center gap-1">
-              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+            <span className="ml-auto hidden lg:flex">
+              <LiveStatus departAt={departAt} />
+            </span>
+            <nav className="ml-auto flex items-center gap-1 lg:ml-1">
+              <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Profilis
               </Link>
-              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2.5 lg:py-1.5 lg:text-sm">
+              <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-2 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Kaip skaičiuojame
               </Link>
             </nav>
@@ -373,8 +419,8 @@ export default function Planner() {
             </button>
           )}
 
-          <div className={`${collapsed ? "hidden lg:flex" : "flex"} flex-col gap-3 px-3 pb-3 lg:gap-4 lg:p-4`}>
-            <div className="hidden lg:block">
+          <div className={`${collapsed ? "hidden lg:flex" : "flex"} flex-col gap-3 px-3 pb-3 lg:gap-4 lg:px-6 lg:pt-5 lg:pb-2`}>
+            <div className={plan ? "hidden" : "hidden lg:block"}>
               <h1 className="font-display text-[22px] leading-tight font-bold">Kuo važiuoti iš A į B?</h1>
               <p className="mt-1 text-sm text-[var(--muted)]">
                 Palyginkite automobilį, autobusą, dviratį, paspirtuką ir kojas: laiką su spūstimis ir A juostomis, kainą su parkavimu, CO₂.
@@ -382,7 +428,7 @@ export default function Planner() {
             </div>
 
             {/* Route box: A and B joined by a dashed lane line. */}
-            <div className="relative lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:p-3 lg:shadow-xl">
+            <div className="relative lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:p-3 lg:shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
               <div className="flex gap-2">
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <PlaceInput
@@ -439,6 +485,9 @@ export default function Planner() {
                     aria-label="Išvykimo laikas"
                   />
                 )}
+                <span className="ml-auto hidden lg:block">
+                  <NowClock departAt={departAt} />
+                </span>
                 {collapsed === false && plan && (
                   <button type="button" onClick={() => setEditing(false)} className="ml-auto text-sm font-semibold text-[var(--marking)] lg:hidden">
                     Gerai
@@ -446,7 +495,6 @@ export default function Planner() {
                 )}
               </div>
               {picking && <p className="mt-2 text-xs text-[var(--marking)]">Bakstelėkite žemėlapyje, kur yra {picking === "from" ? "A" : "B"} taškas.</p>}
-              {notice && <p className="mt-2 text-xs text-[var(--wait)]">{notice}</p>}
             </div>
           </div>
         </div>
@@ -471,7 +519,7 @@ export default function Planner() {
                 onClick={() => setTo({ pos: usual.to, label: usual.label })}
                 className="flex items-center gap-3 rounded-2xl border border-[var(--marking)]/60 bg-[var(--panel)] p-3 text-left"
               >
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-sm font-extrabold text-black">B</span>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-sm font-extrabold text-white">B</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">Į {usual.label}?</span>
                   <span className="block text-xs text-[var(--muted)]">Paprastai išvykstate apie {fmtClock(usual.departSec)} · {usual.count} kartai</span>
@@ -489,62 +537,83 @@ export default function Planner() {
 
             {plan && (
               <>
-                {plan.weather && <WeatherCard w={plan.weather} />}
-                <ModeStrip modes={modes} hybrid={topHybrid} best={best} selected={selected} onSelect={selectMode} weather={plan.weather} />
-                {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="eyebrow">Multimodalinė matrica</span>
+                  {best && (
+                    <span className="rounded-full border border-[#a7f3d0] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--marking)]">
+                      Rekomenduojama: {bestHybrid ? hybridTitle(bestHybrid) : bestMode ? MODE_META[bestMode].short : ""}
+                    </span>
+                  )}
+                </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">Kas svarbiausia?</span>
-                  <div className="seg">
+                <div className="flex items-center gap-2">
+                  <div className="seg flex-1" role="group" aria-label="Kas svarbiausia?">
                     {PRIORITIES.map((p) => (
                       <button key={p.id} type="button" aria-pressed={settings.priority === p.id} onClick={() => setSettings({ ...settings, priority: p.id })}>
                         {p.label}
                       </button>
                     ))}
                   </div>
+                  <button
+                    type="button"
+                    disabled={updatingCar}
+                    onClick={() => setRefresh((v) => v + 1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)] disabled:opacity-50"
+                    title={updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
+                    aria-label="Atnaujinti eismą"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={updatingCar ? "animate-spin" : ""}>
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+                      <path d="M21 3v5h-5" />
+                    </svg>
+                  </button>
                 </div>
 
-                <button type="button" disabled={updatingCar} onClick={() => setRefresh((v) => v + 1)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-sm disabled:opacity-50">
-                  {updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
-                </button>
-                <ModeList
-                  plan={plan}
-                  modes={modes}
-                  best={best}
+                {plan.weather && <WeatherCard w={plan.weather} />}
+                <ModeMatrix plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} onSelect={selectMode} />
+                {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
+
+                {/* Car + second leg (P+R, VT, Cyclocity, scooter): the best one open, the rest folded. */}
+                {topHybrid ? (
+                  <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
+                ) : !hybridState.settled && settings.hasCar ? (
+                  <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--line)] px-3 py-2.5 text-sm text-[var(--muted)]" role="status">
+                    <span className="traffic-light scale-75" aria-hidden>
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    Ieškome derinių su automobiliu…
+                  </div>
+                ) : null}
+                <MoreHybrids
+                  items={moreHybrids}
                   selected={selected}
                   onSelect={selectMode}
-                  parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
-                  sig={sig}
-                  before={
-                    topHybrid ? (
-                      <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
-                    ) : !hybridState.settled ? (
-                      <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--line)] px-3 py-2.5 text-sm text-[var(--muted)]" role="status">
-                        <span className="traffic-light scale-75" aria-hidden>
-                          <i />
-                          <i />
-                          <i />
-                        </span>
-                        Ieškome derinių su automobiliu…
-                      </div>
-                    ) : null
-                  }
-                  after={
-                    <MoreHybrids
-                      items={moreHybrids}
-                      selected={selected}
-                      onSelect={selectMode}
-                      render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open sig={sig} onSelect={() => selectMode(h.id)} />}
-                    />
-                  }
+                  render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open sig={sig} onSelect={() => selectMode(h.id)} />}
                 />
                 {hybridState.note && hybrids.length > 0 && <p className="text-[11px] text-[var(--muted)]">{hybridState.note}</p>}
+                {!plan.transit && plan.transitNote && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
+
+                {sel && (
+                  <>
+                    <div className="border-t border-[var(--line)]" />
+                    <ImpactTiles modes={modes} sel={sel} />
+                    {sel.feasible && <RouteSteps plan={plan} mode={sel} toLabel={to?.label ?? "B"} />}
+                    <ModeExtras
+                      plan={plan}
+                      mode={sel}
+                      parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
+                    />
+                    {sel.feasible && <NavButton plan={plan} mode={sel.id} className="lg:hidden" />}
+                  </>
+                )}
 
                 {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={tripSettings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                   Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
-                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap.
+                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap. Orai: meteo.lt.
                   {plan.bikeshareNote && ` ${plan.bikeshareNote}`}
                 </p>
               </>
@@ -575,104 +644,12 @@ export default function Planner() {
             <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
           </div>
         </BottomSheet>
+        {plan && sel?.feasible && (
+          <div className="sticky bottom-0 z-20 mt-auto hidden bg-gradient-to-t from-[var(--panel)] from-60% to-transparent px-6 pt-6 pb-5 lg:block">
+            <NavButton plan={plan} mode={sel.id} />
+          </div>
+        )}
       </aside>
-    </div>
-  );
-}
-
-/** One chip per mode: the whole comparison at a glance (the only thing visible when the sheet is low). */
-function ModeStrip({
-  modes,
-  hybrid,
-  best,
-  selected,
-  onSelect,
-  weather,
-}: {
-  modes: ModeSummary[];
-  /** The best car + second-leg combination, when it beats driving all the way. */
-  hybrid: HybridSummary | null;
-  best: OptionId | null;
-  selected: OptionId | null;
-  onSelect: (m: OptionId) => void;
-  weather: TripWeather | null;
-}) {
-  const order: ModeId[] = ["car", "transit", "bikeshare", "scooter", "bike", "walk"];
-  const sorted = [...modes].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-  return (
-    <div className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] lg:hidden">
-      {hybrid && <HybridChip h={hybrid} best={hybrid.id === best} selected={selected === hybrid.id} onSelect={() => onSelect(hybrid.id)} />}
-      {sorted.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => onSelect(m.id)}
-          aria-pressed={selected === m.id}
-          className={`relative flex shrink-0 snap-start items-center gap-2 rounded-2xl border px-2.5 py-2 text-left ${m.feasible && !m.weatherWarning ? "" : "opacity-50"}`}
-          style={{ borderColor: selected === m.id ? MODE_META[m.id].color : "var(--line)", background: "var(--panel)" }}
-        >
-          <ModeBadge mode={m.id} size={30} />
-          <span>
-            <span className="tnum block font-display text-[15px] leading-tight font-bold">{fmtDurShort(m.duration)}</span>
-            <span className="tnum block text-[11px] text-[var(--muted)]">
-              {m.cost < 0.005 ? "0 €" : fmtEur(m.cost)} · {MODE_TAB[m.id]}
-            </span>
-          </span>
-          {m.id === best && <span className="absolute -top-1.5 right-2 rounded bg-[var(--sign-green)] px-1 text-[9px] font-bold text-white uppercase ring-1 ring-white/80">Geriausia</span>}
-          {m.weatherWarning && weather && (
-            <span className="absolute -top-1.5 right-2 grid h-5 w-5 place-items-center rounded-full bg-[var(--stop)] text-white ring-1 ring-white/80" title={m.weatherWarning}>
-              <WeatherIcon w={weather} size={12} />
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function LayerToggles({ layers, onChange, ev, top }: { layers: Layers; onChange: (l: Layers) => void; ev: boolean; top: number }) {
-  const [open, setOpen] = useState(false);
-  const items: { id: keyof Layers; label: string; swatch: string }[] = [
-    { id: "lanes", label: "A juostos", swatch: "var(--lane)" },
-    { id: "stops", label: "VT stotelės", swatch: "#4b8bff" },
-    { id: "traffic", label: "Gyvas eismas", swatch: "var(--wait)" },
-    { id: "parking", label: "Parkavimas", swatch: "var(--sign-blue)" },
-    // Charging points exist on the map only for cars that can use them.
-    ...(ev ? [{ id: "charging" as const, label: "Įkrovimas", swatch: "#22d3ee" }] : []),
-    { id: "bikeshare", label: "Cyclocity dviračiai", swatch: "#22d3ee" },
-    { id: "scooters", label: "Paspirtukai", swatch: "#f472b6" },
-  ];
-  const on = items.filter((it) => layers[it.id]).length;
-  return (
-    <div className="absolute right-2 z-[500] flex flex-col items-end gap-1.5 lg:top-3 lg:right-3" style={{ top: top ? top + 8 : undefined }}>
-      {/* Phones: one button that unfolds the list, so it never runs under the results sheet. */}
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex min-h-9 items-center gap-2 rounded-full border border-white/30 bg-[var(--panel)]/95 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur lg:hidden"
-      >
-        <LayersIcon size={15} />
-        Sluoksniai{on ? ` · ${on}` : ""}
-      </button>
-      <div className={`${open ? "flex" : "hidden"} flex-col items-end gap-1.5 lg:flex`}>
-        {items.map((it) => (
-          <button
-            key={it.id}
-            type="button"
-            aria-pressed={layers[it.id]}
-            aria-label={it.label}
-            title={it.label}
-            onClick={() => onChange({ ...layers, [it.id]: !layers[it.id] })}
-            className={`flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur transition ${
-              layers[it.id] ? "border-white/30 bg-[var(--panel)]/95 text-[var(--ink)]" : "border-[var(--line)] bg-[var(--bg)]/80 text-[var(--muted)]"
-            }`}
-          >
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: layers[it.id] ? it.swatch : "transparent", boxShadow: `inset 0 0 0 2px ${it.swatch}` }} />
-            {it.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -698,7 +675,7 @@ function Intro({ onExample }: { onExample: (e: (typeof EXAMPLES)[number]) => voi
       <ol className="flex flex-col gap-2">
         {steps.map(([n, t]) => (
           <li key={n} className="flex items-center gap-3 text-sm">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-xs font-extrabold text-black">{n}</span>
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-xs font-extrabold text-white">{n}</span>
             {t}
           </li>
         ))}
