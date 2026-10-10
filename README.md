@@ -5,14 +5,14 @@ transportu, Cyclocity dviračiu, paspirtuku, savo dviračiu ar pėsčiomis**. Ki
 parkavimas, bilietai) ir CO₂, o skiltis „Jei vietoj automobilio…“ – kiek pinigų, laiko ir CO₂ sutaupytumėte
 (ar prarastumėte) per kelionę ir per metus, ir kiek medžių tiek CO₂ sugertų.
 
-Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis – tik Lietuva.
+Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo paslauga. Žemėlapis – tik Lietuva.
 
 ## Kas veikia
 
 - A / B: adresų ir stotelių paieška rašant, smeigtukas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
 - Išvykimas dabar arba pasirinktu laiku
-- **Automobilis:** OSRM maršrutas + spūstys (gyvi Via Lietuva jutikliai magistralėse, piko valandų priedas miestuose) +
-  parkavimo vietos paieška; kaina = degalai + mokamo parkavimo zona tikslo vietoje (+ pasirinktinai nusidėvėjimas)
+- **Automobilis:** TomTom Orbis maršrutas su dabartiniu arba prognozuojamu eismu pagal išvykimo laiką; be rakto ar paslaugai neveikiant – pažymėtas OSRM / Via Lietuva atsarginis vertinimas.
+  Pasirinkus parkavimą perskaičiuojama tik važiavimo atkarpa iki tos vietos; atskirai rodomas ėjimas iki automobilio, vietos paieška ir ėjimas iki B. Meteo.lt orų perspėjimai nekeičia ETA. Waze mygtukas atidaro važiavimą į pasirinktą vietą.
 - **Viešasis transportas:** visos Lietuvos tvarkaraščiai (miestai, rajonai, tarpmiestiniai), RAPTOR maršrutizavimas su
   persėdimais, kiek kelio eina gatvėmis su A juosta, bilieto kaina pagal miestą, kitas reisas
 - **Cyclocity dviratis (Vilnius):** gyvi GBFS duomenys – artimiausia stotelė su laisvu dviračiu, stotelė prie B su laisva vieta
@@ -21,6 +21,11 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
 - **Telefone:** žemėlapis per visą ekraną, kompaktiška paieška viršuje, tempiamas rezultatų skydelis
 - „Geriausias pasirinkimas“ pagal prioritetą: subalansuotai / greičiausia / pigiausia / žaliausia
+- **Parkavimas:** „Kur palikti automobilį“ – gatvė prie tikslo, stovėjimas gatvėse, aikštelės (JUDU, UNIPARK, prekybos centrai,
+  OpenStreetMap) per jūsų ėjimo atstumą: kaina jūsų stovėjimui, ėjimas, tikimybė rasti vietą (JUDU istorija ir gyvi duomenys);
+  parinkta pagal prioritetą, galima pasirinkti kitą. Elektromobiliams – ir įkrovimo vietos (jungtys, kW, kaina, gyva būsena)
+- `/profilis`: automobilis (kuras, sąnaudos, kaina), elektromobilis (jungtys, AC/DC galia, baterija, JUDU leidimas), stovėjimo trukmė,
+  didžiausias ėjimas, bilietai, prioritetas – saugoma tik naršyklėje
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
 - Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), mokamo parkavimo zonos, Cyclocity stotelės
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
@@ -34,7 +39,9 @@ Viskas skaičiuojama iš atvirų valstybės ir miestų duomenų. Žemėlapis –
 | [SĮ „Susisiekimo paslaugos“ – A juostos](https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/A_juostos_WFL1_per%C5%BEi%C5%ABra/FeatureServer) | Vilniaus A / A+ juostos |
 | OpenStreetMap (Overpass) | autobusų juostos kituose miestuose |
 | [Via Lietuva – eismoinfo.lt](https://eismoinfo.lt/traffic-intensity-service) | gyvas vidutinis greitis kelių jutikliuose (kas 15 min.) |
-| [Vilniaus m. sav. – vietinės rinkliavos zonos](https://zemelapiai.vplanas.lt/arcgis/rest/services/Open_Data/Vietines_rinkliavos_zonos/MapServer) | parkavimo kainos ir laikas |
+| [TomTom Orbis Routing API](https://docs.tomtom.com/routing-api/) | važiavimo maršrutas, trukmė su eismu, maršruto eismo sutrikimai |
+| [LHMT – Meteo.lt API](https://api.meteo.lt/) | orų prognozės maršruto pradžioje, viduryje ir pabaigoje; CC BY-SA 4.0 |
+| [JUDU – rinkliavos zonos nuo 2025-07-01](https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/rinkliavos_zonos_2025_07/FeatureServer/5) | Vilniaus zonų kainos ir laikas (CC BY-NC 4.0) |
 | [Klaipėdos m. sav. – parkavimo zonos](https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer) | parkavimo kainos ir laikas |
 | [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | automobilio, dviračio, pėsčiųjų maršrutai |
 | [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
@@ -56,11 +63,34 @@ npm run dev
 
 Atidaryti http://localhost:3000. Paruošti duomenys jau yra repozitorijoje (`data/`, `public/data/`).
 
+### Driving traffic setup (free tier only)
+
+Copy `.env.example` to `.env.local` and set `TOMTOM_API_KEY` to a server-side key for TomTom Orbis Routing v3. Restart the dev server. In Vercel, set the same server environment variable and redeploy. Never use a `NEXT_PUBLIC_` key or commit `.env.local`.
+
+Use TomTom's **Start building** account without enabling billing or a paid plan. [Current pricing](https://docs.tomtom.com/pricing) includes 20,000 routing requests per month without a credit card; check the account's quota before deployment. The provider enforces that free account limit; HTTP 429 switches the app to its labelled fallback. The app cannot prevent charges if an operator supplies a key belonging to a paid account.
+
+Routing refreshes on trip/time changes, on a chosen parking change, or through **Atnaujinti eismą**. There is no routing polling. One initial comparison makes one provider routing call; a different selected parking endpoint makes one additional call. Other parking candidates are not routed in bulk. Concurrent identical requests share in-flight work; completed traffic routes are not cached. Meteo public place data is cached for 24 hours and forecasts for 30 minutes. Via Lietuva readings older than 30 minutes, future readings, invalid speeds and wrong-direction sensors are excluded.
+
+TomTom's duration already includes traffic: no city multiplier, sensor delay or guessed weather penalty is added. Closures, roadworks and incidents are considered where the provider has coverage, not guaranteed for every road. A confirmed no-route response stays unavailable instead of falling back through a closure. Future trips use departure-time prediction, not a claim of live measurements. The OSRM fallback is approximate and cannot reliably account for current closures or roadworks.
+
+**Atidaryti Waze** opens a [Live Map route permalink](https://support.google.com/waze/answer/6274015?hl=en) with both car-leg endpoints prefilled (`from=ll.lat,lng&to=ll.lat,lng`). Waze calculates and displays its own route, which may differ from the app's route. **Naviguoti nuo mano vietos** keeps the [official native-app deep link](https://developers.google.com/waze/deeplinks) with `ll`, `navigate=yes` and `utm_source`; native navigation starts from the driver's GPS location, not a custom planned origin. Live Map's permalink parameters were verified in its browser UI; they are not custom-origin parameters for the native deep-link API. A verified `navigationPos` is preferred over parking coordinates when present. `CarLeg`, `/api/drive` and `CarDriveDetails` can also serve a later hybrid planner; generating complete hybrid trips is outside this change.
+
+### Validation
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Tests use deterministic provider/sensor/weather fixtures, including quota/authentication/timeouts, confirmed no-route, DST transitions, stale sensors and selected-parking ETA/geometry/fuel/CO₂/Waze consistency. Before release with a real key, compare TomTom estimates against observed driving times for city peak/off-peak, a motorway trip and an alternate parking endpoint. Verify Waze handoff on Android and iOS, both with and without Waze installed. These real-provider and physical-device checks require the deployment key/devices; fixture tests do not establish real-world ETA accuracy.
+
 ### Duomenų atnaujinimas
 
 ```bash
 npm run data              # viskas
-npm run data -- transit   # tik dalis: transit | lanes | parking | border
+npm run data -- transit   # tik dalis: transit | lanes | parking | chargers | border
 ```
 
 Tvarkaraščiai galioja 6 savaites nuo paruošimo dienos (vėlesnei datai imama ta pati savaitės diena), todėl
@@ -84,11 +114,17 @@ preview aplinkose – produkcijoje jų nėra, nebent `SCOOTER_DEMO=1`. Visur jie
 
 ```
 GET /api/plan?from=54.7329,25.2236&to=54.6812,25.2876[&depart=2026-10-12T08:00]
+GET /api/drive?from=54.7329,25.2236&to=54.6800,25.2800[&depart=2026-10-12T05:02:00Z]
 GET /api/traffic
 GET /api/bikeshare
 GET /api/scooters?bbox=54.66,25.24,54.70,25.32
 GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 ```
+
+`/api/plan` priima ir `walk=10` (didžiausias ėjimas nuo automobilio, min.) ir grąžina `car.parkingOptions`; kainas pagal profilį skaičiuoja naršyklė.
+`/api/parking` – gyvos laisvos vietos JUDU aikštelėse ir (su `chargers=1`) įkrovimo vietų būsena.
+
+`/api/plan` departure is the door departure; it includes a 2-minute access assumption before driving. `/api/drive` departure is the start of the driving leg itself. Both accept Lithuanian local time or ISO time with an explicit offset and return ISO instants. Nonexistent spring DST times are rejected; ambiguous autumn local times use the earlier occurrence (send an explicit offset to choose the later one). `/api/drive` returns a `CarLeg`; optional `parkingFor=lat,lng&walk=10` adds parking options around the final destination evaluated at the new driving arrival. Route responses use `Cache-Control: no-store`. The key and raw provider errors are never returned to the browser.
 
 ## Struktūra
 

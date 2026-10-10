@@ -9,7 +9,7 @@ export const PRIORITIES: { id: Priority; label: string }[] = [
   { id: "green", label: "Žaliausia" },
 ];
 
-function NumberField({
+export function NumberField({
   label,
   value,
   unit,

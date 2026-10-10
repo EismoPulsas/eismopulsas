@@ -1,5 +1,6 @@
 import { fareOf, type FareLine } from "./fares";
-import type { ParkingZone, PlanResponse, RideLeg } from "./plan-types";
+import type { Charger, ChargerPlug, Connector, LotTariff, ParkingOption, ParkingRule, ParkingZone, PlanResponse, RideLeg } from "./plan-types";
+import { localSecondsAt } from "./departure";
 
 // Money, time, CO₂ and calories for each way of making the trip. Everything here
 // runs in the browser so changing a setting updates the comparison instantly.
@@ -40,11 +41,27 @@ function rideCo2(r: RideLeg): number {
 
 export type Priority = "balanced" | "fast" | "cheap" | "green";
 
+/** The user's profile (kept in the browser only). */
 export type Settings = {
+  /** false: the car option is shown as not available. */
+  hasCar: boolean;
   fuel: Fuel;
   consumption: number;
   fuelPrice: number;
+  /** A hybrid that charges from a plug (counts as an EV for charging, not for JUDU permits). */
+  plugIn: boolean;
+  /** EV: the connectors the car takes. */
+  connectors: Connector[];
+  /** EV: the most the car accepts, kW. */
+  acKw: number;
+  dcKw: number;
+  /** EV: usable battery, kWh (caps what a long stop can charge). */
+  batteryKwh: number;
+  /** Holds JUDU's (free) electric-vehicle parking permit. */
+  evPermit: boolean;
   parkingHours: number;
+  /** Longest acceptable walk from the car to B, minutes. */
+  maxWalkMin: number;
   wear: boolean;
   ticket: "single" | "pass";
   discount: 0 | 50 | 80;
@@ -56,10 +73,18 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
+  hasCar: true,
   fuel: "petrol",
   consumption: FUELS.petrol.consumption,
   fuelPrice: FUELS.petrol.price,
+  plugIn: false,
+  connectors: ["T2", "CCS"],
+  acKw: 11,
+  dcKw: 100,
+  batteryKwh: 60,
+  evPermit: false,
   parkingHours: 2,
+  maxWalkMin: 10,
   wear: false,
   ticket: "single",
   discount: 0,
@@ -69,9 +94,16 @@ export const DEFAULT_SETTINGS: Settings = {
   scooterPerMin: 0.15,
 };
 
+/** Charging points are shown and counted only for cars that can use them. */
+export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybrid" && s.plugIn);
+/** JUDU issues the EV permit for fully electric cars only, not hybrids. */
+const hasEvPermit = (s: Settings) => s.fuel === "electric" && s.evPermit;
+
+export type ModeId = "car" | "transit" | "bike" | "walk";
 export type ModeId = "car" | "transit" | "bikeshare" | "scooter" | "bike" | "walk";
 
-export type CostLine = { label: string; value: number; approx?: boolean; note?: string };
+/** `unknown`: the price could not be worked out; `value` is then 0 and must not be shown as a price. */
+export type CostLine = { label: string; value: number; approx?: boolean; unknown?: boolean; note?: string };
 
 export type ModeSummary = {
   id: ModeId;
@@ -83,6 +115,8 @@ export type ModeSummary = {
   kcal: number;
   feasible: boolean;
   why?: string;
+  /** Car: where it is left at B. */
+  parking?: ParkingEval | null;
 };
 
 /** Paid parking hours in [start, start + hours] under the zone's rules. */
@@ -106,7 +140,197 @@ export function paidParkingHours(zone: ParkingZone, date: string, start: number,
   return Math.min(hours, paid);
 }
 
-export function summarize(plan: PlanResponse, s: Settings): ModeSummary[] {
+const fmt2 = (v: number) => `${v.toFixed(2).replace(".", ",")} €`;
+
+/** Street parking in a municipal zone, with the Vilnius EV rules (JUDU EV permit). */
+export function zoneCost(z: ParkingZone, date: string, start: number, hours: number, s: Settings): { cost: number; note: string } {
+  const paid = paidParkingHours(z, date, start, hours);
+  if (!paid) return { cost: 0, note: "šiuo metu nemokama" };
+  const first = z.firstHour ?? z.price;
+  if (hasEvPermit(s) && z.city === "Vilnius") {
+    // Blue zone: the first hour is free for EVs, then 3,50 € and 4 €/h; elsewhere free with the permit.
+    if (!z.zone.startsWith("Mėlyn")) return { cost: 0, note: "nemokama su JUDU elektromobilio leidimu" };
+    const cost = Math.min(Math.max(paid - 1, 0), 1) * first + Math.max(paid - 2, 0) * z.price;
+    return { cost, note: "elektromobiliui pirma valanda nemokama" };
+  }
+  const cost = Math.min(paid, 1) * first + Math.max(paid - 1, 0) * z.price;
+  return { cost, note: `${paid.toFixed(1).replace(".", ",")} val. mokamo laiko × ${fmt2(z.price)}${z.firstHour ? ` (pirma ${fmt2(z.firstHour)})` : ""}` };
+}
+
+/** Is the moment (sec after local midnight of `date`) inside the rules? null = always. */
+function ruleAt(rules: ParkingRule[] | null | undefined, date: string, sec: number): boolean {
+  if (!rules) return true;
+  const d = new Date(Date.parse(`${date}T00:00:00Z`) + Math.floor(sec / 86400) * 86400000);
+  const wd = d.getUTCDay() || 7;
+  const md = (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+  const h = (((sec % 86400) + 86400) % 86400) / 3600;
+  return rules.some((r) => {
+    if (r.season) {
+      const [from, to] = r.season;
+      if (!(from <= to ? md >= from && md <= to : md >= from || md <= to)) return false;
+    }
+    return r.days.includes(wd) && r.hours.some(([a, b]) => h >= a && h < b);
+  });
+}
+
+/**
+ * What staying `hours` from `start` (sec after local midnight of `date`) costs in a car
+ * park, or null when its rules are unknown. Every started billing step is paid at the
+ * rate in force when it starts.
+ */
+export function lotCost(t: LotTariff, date: string, start: number, hours: number): number | null {
+  if (!t.known) return null;
+  if (t.free) return 0;
+  const total = hours * 60;
+  if (t.flat) {
+    // P+R: valid until the end of the day; each further day costs another ticket.
+    const days = Math.floor((start + total * 60) / 86400) - Math.floor(start / 86400) + 1;
+    return t.flat.price * days;
+  }
+  const step = t.step ?? 1;
+  const freeMin = t.freeMin && ruleAt(t.freeRules, date, start) ? t.freeMin : 0;
+  let cost = 0;
+  for (let m = freeMin; m < total; m += step) {
+    let perHour = 0;
+    if (t.tiers) perHour = [...t.tiers].reverse().find((x) => m >= x.fromMin)?.perHour ?? 0;
+    else perHour = t.rates?.find((r) => ruleAt(r.rules, date, start + m * 60))?.perHour ?? 0;
+    cost += (perHour * step) / 60;
+  }
+  if (t.dayCap) cost = Math.min(cost, t.dayCap * Math.ceil(total / 1440));
+  return Math.round(cost * 100) / 100;
+}
+
+export type Chance = "high" | "mid" | "low";
+
+export type ParkingEval = {
+  option: ParkingOption;
+  /** € for the stay; null = unknown. */
+  cost: number | null;
+  costNote: string;
+  /** Seconds: walking from the car to B, and finding a space / getting in. */
+  walkSec: number;
+  searchSec: number;
+  chance: Chance | null;
+  chanceText: string | null;
+  /** EV: what charging during the stay could give. */
+  charge: { kW: number; kWh: number; km: number; cost: number | null; plug: ChargerPlug; charger: Charger } | null;
+  usable: boolean;
+  why?: string;
+};
+
+const WEEKDAY_LT = ["pirmadienį", "antradienį", "trečiadienį", "ketvirtadienį", "penktadienį", "šeštadienį", "sekmadienį"];
+const fmtH = (sec: number) => `${String(Math.floor((((sec % 86400) + 86400) % 86400) / 3600)).padStart(2, "0")}:00`;
+const pct = (p: number) => (p >= 95 ? "beveik visada" : p >= 75 ? "dažniausiai" : p >= 40 ? "kartais" : "retai");
+export const fmtStay = (min: number) => (min % 60 ? `${min} min.` : `${min / 60} val.`);
+
+/** The best plug for this car at a charger, and what it could charge during the stay. */
+function bestCharge(chargers: Charger[] | undefined, s: Settings, hours: number): ParkingEval["charge"] {
+  if (!chargers?.length || !isEv(s)) return null;
+  let best: ParkingEval["charge"] = null;
+  for (const c of chargers)
+    for (const plug of c.plugs) {
+      if (!s.connectors.includes(plug.std)) continue;
+      const kW = Math.min(plug.kW, plug.dc ? s.dcKw : s.acKw);
+      if (!kW || (best && kW <= best.kW)) continue;
+      // Energy the car could take in the time parked, at most 20 → 90 % of the battery.
+      const kWh = Math.round(Math.min(kW * hours * 0.9, s.batteryKwh * 0.7));
+      const cost = plug.perKwh != null ? kWh * plug.perKwh + (plug.perMin ?? 0) * hours * 60 + (plug.start ?? 0) : null;
+      best = { kW, kWh, km: Math.round((kWh / s.consumption) * 100), cost, plug, charger: c };
+    }
+  return best;
+}
+
+/** Cost, time and chance of a space for one place to leave the car, under this profile. */
+export function evalParking(o: ParkingOption, plan: PlanResponse, s: Settings): ParkingEval {
+  const date = plan.depart.date;
+  let start = plan.car ? localSecondsAt(plan.car.drive.arrivalAt, date) : plan.depart.sec;
+  const hours = s.parkingHours;
+  const walkSec = Math.round(o.walk / 1.3);
+  const base: ParkingEval = { option: o, cost: null, costNote: "", walkSec, searchSec: 0, chance: null, chanceText: null, charge: bestCharge(o.chargers, s, hours), usable: true };
+
+  if (o.kind === "zone" || o.kind === "street") {
+    // Looking for a free space on the street takes longer where streets are full.
+    const busy = (o.streetOccupancy ?? 0) >= 85;
+    base.searchSec = o.kind === "zone" ? (o.zone ? 360 : 180) : busy ? 300 : 180;
+    start += base.searchSec;
+    if (o.streetOccupancy != null) {
+      base.chance = o.streetOccupancy >= 90 ? "low" : o.streetOccupancy >= 75 ? "mid" : "high";
+      base.chanceText = `Šios zonos gatvėse paprastai užimta ~${o.streetOccupancy} % vietų`;
+    }
+    if (o.zone) {
+      const z = zoneCost(o.zone, date, start, hours, s);
+      base.cost = z.cost;
+      base.costNote = z.note;
+    } else if (o.fee === "yes") {
+      base.costNote = "mokama, kaina nežinoma";
+    } else {
+      base.cost = 0;
+      base.costNote = "ne mokamoje zonoje";
+    }
+    if (o.maxStayMin && o.maxStayMin < hours * 60) {
+      base.usable = false;
+      base.why = `Ilgiausiai ${fmtStay(o.maxStayMin)}`;
+    }
+    return base;
+  }
+
+  if (o.kind === "charger") {
+    if (!isEv(s)) return { ...base, usable: false, why: "Tik elektromobiliams" };
+    if (!base.charge) return { ...base, usable: false, why: "Netinka jūsų automobilio jungtis" };
+    base.searchSec = 60;
+    base.costNote = "stovėjimo kaina – pagal vietos taisykles";
+    return base;
+  }
+
+  // Car park.
+  const l = o.lot!;
+  base.searchSec = l.gated ? 90 : 60;
+  start += base.searchSec;
+  if (hasEvPermit(s) && l.src === "judu" && !l.gated && l.t.known && !l.t.flat) {
+    // JUDU's EV permit covers its car parks without a barrier.
+    base.cost = 0;
+    base.costNote = "nemokama su JUDU elektromobilio leidimu";
+  } else {
+    base.cost = lotCost(l.t, date, start, hours);
+    base.costNote = base.cost == null ? "taisyklės nežinomos" : l.t.flat ? "parkavimas + viešasis transportas visai dienai" : base.cost === 0 ? "nemokama" : (l.t.text[0] ?? "");
+  }
+  if (l.t.maxStayMin && l.t.maxStayMin < hours * 60) {
+    base.usable = false;
+    base.why = `Ilgiausiai ${fmtStay(l.t.maxStayMin)}`;
+  }
+  if (o.live) {
+    base.chance = o.live.vacant >= 5 ? "high" : o.live.vacant > 0 ? "mid" : "low";
+    base.chanceText = `Dabar laisva ${o.live.vacant} iš ${o.live.capacity}`;
+  } else if (o.typical?.p != null) {
+    const p = o.typical.p;
+    const wd = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6 + Math.floor(start / 86400)) % 7;
+    base.chance = p >= 90 ? "high" : p >= 60 ? "mid" : "low";
+    base.chanceText = `${WEEKDAY_LT[wd][0].toUpperCase()}${WEEKDAY_LT[wd].slice(1)} ${fmtH(start)} vietą rasite ${pct(p)} (${p} % dienų${o.typical.free != null ? `, ~${o.typical.free} laisvų` : ""})`;
+  }
+  return base;
+}
+
+/** € a minute of the user's time is worth when weighing price against walking ("balanced"). */
+const MINUTE_EUR = { balanced: 0.15, fast: 1, cheap: 0.02, green: 0.15 } satisfies Record<Priority, number>;
+
+/** The place to leave the car that suits the priority best; never one with an unknown price. */
+export function bestParking(evals: ParkingEval[], p: Priority): ParkingEval | null {
+  const ok = evals.filter((e) => e.usable && e.cost != null && e.chance !== "low");
+  const pool = ok.length ? ok : evals.filter((e) => e.usable && e.cost != null);
+  if (!pool.length) return null;
+  // Prices tagged by OpenStreetMap volunteers can be out of date: a small penalty keeps
+  // official and operator-published prices ahead when the difference is small.
+  const score = (e: ParkingEval) =>
+    e.cost! + ((e.walkSec + e.searchSec) / 60) * MINUTE_EUR[p] + (e.chance === "mid" ? 0.5 : 0) + (e.option.lot?.src === "osm" && e.cost! > 0 ? 0.5 : 0);
+  return [...pool].sort((a, b) => score(a) - score(b))[0];
+}
+
+/** All options under this profile; chargers only for cars that can charge. */
+export function parkingEvals(plan: PlanResponse, s: Settings): ParkingEval[] {
+  return (plan.car?.parkingOptions ?? []).filter((o) => o.kind !== "charger" || isEv(s)).map((o) => evalParking(o, plan, s));
+}
+
+export function summarize(plan: PlanResponse, s: Settings, parkingId?: string | null): ModeSummary[] {
   const out: ModeSummary[] = [];
 
   if (plan.car) {
@@ -114,25 +338,33 @@ export function summarize(plan: PlanResponse, s: Settings): ModeSummary[] {
     const km = c.distance / 1000;
     const units = (km * s.consumption) / 100;
     const lines: CostLine[] = [{ label: FUELS[s.fuel].label, value: units * s.fuelPrice, note: `${units.toFixed(1)} ${FUELS[s.fuel].unit}` }];
-    if (c.parking) {
-      const arrive = plan.depart.sec + c.duration;
-      const hours = paidParkingHours(c.parking, plan.depart.date, arrive, s.parkingHours);
-      lines.push({
-        label: `Parkavimas, ${c.parking.zone.toLowerCase()}`,
-        value: hours * c.parking.price,
-        note: hours ? `${hours.toFixed(1)} val. × ${c.parking.price.toFixed(2)} €` : "šiuo metu nemokama",
-      });
+    const evals = parkingEvals(plan, s);
+    const park = evals.find((e) => e.option.id === parkingId) ?? bestParking(evals, s.priority);
+    let duration = c.duration;
+    if (park) {
+      // Replace the server's default "find a spot and walk" allowance with this place's.
+      duration = c.drive.duration + 120 + park.searchSec + park.walkSec;
+      lines.push(
+        park.cost == null
+          ? { label: `Parkavimas: ${park.option.name}`, value: 0, unknown: true, note: park.costNote }
+          : { label: `Parkavimas: ${park.option.name}`, value: park.cost, note: park.costNote },
+      );
+    } else if (c.parking) {
+      const { cost, note } = zoneCost(c.parking, plan.depart.date, c.arrive, s.parkingHours, s);
+      lines.push({ label: `Parkavimas, ${c.parking.zone.toLowerCase()}`, value: cost, note });
     }
     if (s.wear) lines.push({ label: "Nusidėvėjimas, padangos, servisas", value: km * WEAR_PER_KM, approx: true, note: `${WEAR_PER_KM} €/km` });
     out.push({
       id: "car",
-      duration: c.duration,
+      duration,
       distance: c.distance,
       cost: lines.reduce((a, l) => a + l.value, 0),
       costLines: lines,
       co2: units * FUELS[s.fuel].co2,
       kcal: 0,
-      feasible: true,
+      feasible: s.hasCar,
+      why: s.hasCar ? undefined : "Profilyje nurodyta, kad automobilio neturite",
+      parking: park,
     });
   }
 

@@ -21,14 +21,151 @@ export type ParkingZone = {
   zone: string;
   /** €/h */
   price: number;
+  /** €/h for the first paid hour, when it differs (Vilnius blue zone). */
+  firstHour?: number;
   text: string;
   rules: ParkingRule[] | null;
+};
+
+/**
+ * A car park's prices, as far as they are known. `text` is always the published
+ * wording; the structured fields drive the cost estimate (lib/metrics.ts › lotCost).
+ */
+export type LotTariff = {
+  /** false: we could not read the rules, so the cost is unknown (never assumed 0). */
+  known: boolean;
+  text: string[];
+  free?: boolean;
+  /** P+R: one price for the day, public transport included. */
+  flat?: { price: number; per: "day" };
+  /** Free minutes at the start of a stay… */
+  freeMin?: number;
+  /** …only when arriving inside these rules (e.g. store hours). */
+  freeRules?: ParkingRule[];
+  /** €/h; the first whose rules match the moment applies, none = free at that moment. */
+  rates?: { rules: ParkingRule[] | null; perHour: number }[];
+  /** €/h by time already parked (overrides `rates`). */
+  tiers?: { fromMin: number; perHour: number }[];
+  /** Most you pay per 24 h. */
+  dayCap?: number;
+  /** Billing step in minutes: every started step is paid in full. */
+  step?: number;
+  maxStayMin?: number;
+  /** Monthly subscription from, €. */
+  monthly?: number;
+  /** An assumption the estimate relies on, shown to the user. */
+  assumed?: string;
+  charging?: boolean;
+};
+
+export type LotSource = "judu" | "unipark" | "curated" | "osm";
+export type LotAccess = "public" | "customers" | "pr" | "unknown";
+
+export type Lot = {
+  id: string;
+  src: LotSource;
+  name: string | null;
+  addr: string | null;
+  city: string | null;
+  pos: LatLng;
+  poly?: LatLng[][][];
+  /** OSM parking=* (surface, underground, multi-storey, rooftop…). */
+  kind?: string;
+  gated?: boolean;
+  access: LotAccess;
+  cap: number | null;
+  op?: string | null;
+  url?: string | null;
+  /** Whose customers an unnamed lot serves (nearest shop). */
+  near?: string;
+  /** Resident permits valid (JUDU). */
+  res?: boolean;
+  t: LotTariff;
+  /** Key into lot-occupancy.json and the live feed (JUDU gated lots). */
+  occ?: string;
+  code?: string | null;
+  charging?: boolean;
+  checked?: string;
+};
+
+/** Weekday (0 = Monday) × hour (0–23), Europe/Vilnius. */
+export type OccupancyProfile = {
+  cap: number;
+  /** Typical free spaces (median of hourly means). */
+  free: (number | null)[][];
+  /** % of days with at least one space free for the whole hour. */
+  p: (number | null)[][];
+  /** Days observed. */
+  n: number[][];
+};
+
+export type LiveLot = { vacant: number; capacity: number; at: string };
+
+export type Connector = "T2" | "CCS" | "CHADEMO" | "T1" | "SCHUKO" | "OTHER";
+
+export type Charger = {
+  id: string;
+  name: string;
+  pos: LatLng;
+  address: string | null;
+  city: string | null;
+  operator: string | null;
+  /** Connector groups: standard, AC/DC, kW, how many, and their published price (€, VAT as published). */
+  plugs: ChargerPlug[];
+  /** true: open around the clock; null: not stated. */
+  open24: boolean | null;
+  /** The car park it stands in, if any (lots.json id). */
+  lotId?: string;
+};
+
+export type ChargerPlug = {
+  std: Connector;
+  dc: boolean;
+  kW: number;
+  n: number;
+  perKwh?: number;
+  perMin?: number;
+  parkingPerMin?: number;
+  start?: number;
+  priceText?: string;
+};
+
+/** Where to leave the car near B; costs are worked out in the browser from the user's settings. */
+export type ParkingOption = {
+  kind: "zone" | "street" | "lot" | "charger";
+  id: string;
+  name: string;
+  pos: LatLng;
+  /** Verified vehicle entrance, when the source supplies one. */
+  navigationPos?: LatLng;
+  /** Walking distance to B, metres (straight line × 1.3). */
+  walk: number;
+  lot?: Omit<Lot, "poly">;
+  /** Street parking: the municipal zone it lies in (null = outside any paid zone). */
+  zone?: ParkingZone | null;
+  /** Street parking: OSM fee tag outside zones ("yes"/"no"), if any. */
+  fee?: string | null;
+  maxStayMin?: number;
+  /** Street parking: how full streets in this resident area usually are, %. */
+  streetOccupancy?: number | null;
+  /** At the arrival weekday and hour, from 12 weeks of JUDU history. */
+  typical?: { free: number | null; p: number | null; days: number } | null;
+  live?: LiveLot | null;
+  chargers?: Charger[];
 };
 
 export type TrafficInfo = {
   /** "live" = eismoinfo.lt sensors on the route; "typical" = time-of-day estimate only. */
   source: "live" | "typical";
-  sensors: { name: string; road: string; speed: number; limit: number; vehicles: number }[];
+  provider: "tomtom" | "osrm";
+  mode: "live" | "predicted" | "approximate";
+  calculatedAt: string;
+  observedAt: string | null;
+  partialCoverage: boolean;
+  fallbackReason: "missing-key" | "quota" | "authentication" | "timeout" | "provider-error" | "invalid-response" | null;
+  /** Included in driving duration; never added again. */
+  delaySeconds: number | null;
+  sensors: { name: string; road: string; speed: number; limit: number; vehicles: number; observedAt: string }[];
   /** Seconds added by city peak-hour estimate. */
   urbanDelay: number;
   /** Seconds added (or saved) by live sensor speeds. */
@@ -37,16 +174,39 @@ export type TrafficInfo = {
   peak: "peak" | "day" | "night";
 };
 
+export type DriveWarning = { kind: "traffic" | "weather"; text: string; at?: string };
+
+/** A reusable driving-only leg; access, parking and walking are separate. */
+export type CarLeg = {
+  kind: "car";
+  from: LatLng;
+  to: LatLng;
+  duration: number;
+  distance: number;
+  geometry: LatLng[];
+  departureAt: string;
+  arrivalAt: string;
+  baseDuration: number | null;
+  traffic: TrafficInfo;
+  warnings: DriveWarning[];
+  weather: { status: "available" | "partial" | "unavailable"; forecastCreatedAt: string | null };
+};
+
 export type CarResult = {
+  drive: CarLeg;
   distance: number;
   /** Free-flow driving time from OSRM. */
-  baseDuration: number;
+  baseDuration: number | null;
   traffic: TrafficInfo;
   /** Getting to the car + finding a spot + walking from it. */
   overhead: number;
   duration: number;
   geometry: LatLng[];
   parking: ParkingZone | null;
+  /** Arrival at B, seconds since local midnight of the departure day. */
+  arrive: number;
+  /** Car parks, street-side parking and (for EVs) chargers within walking distance of B. */
+  parkingOptions: ParkingOption[];
 };
 
 export type ActiveResult = { distance: number; duration: number; geometry: LatLng[] };
@@ -128,7 +288,7 @@ export type TransitResult = {
 export type PlanResponse = {
   from: LatLng;
   to: LatLng;
-  depart: { date: string; sec: number; weekday: number; isNow: boolean };
+  depart: { date: string; sec: number; weekday: number; isNow: boolean; at: string };
   straight: number;
   car: CarResult | null;
   bike: ActiveResult | null;
