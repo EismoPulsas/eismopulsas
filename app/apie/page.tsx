@@ -158,8 +158,9 @@ export default function About() {
               Tikimybė 30–60 %, nedidelis lietus, gūsiai ≥ 11 m/s ar ≤ 2 °C – perspėjame „atsargiai“, bet rekomendacijos nekeičiame.
             </li>
             <li>
-              <b>Waze:</b> „Atidaryti Waze“ parodo Waze žemėlapį su abiem automobilio atkarpos taškais – išvykimo vieta ir tikslu (pasirinktu parkavimu).
-              „Naviguoti nuo mano vietos“ atidaro navigaciją į tą patį tikslą nuo dabartinės jūsų vietos. Waze parenka savo maršrutą, kuris gali skirtis nuo mūsų žemėlapyje rodomo kelio.
+              <b>Waze ir Google Maps:</b> kiekvienas etapas turi savo mygtuką. Važiavimas atidaromas Waze navigacija į stovėjimo vietą (nuo dabartinės jūsų
+              vietos), ėjimas, VT ir važiavimas dviračiu ar paspirtuku – Google Maps nuo etapo pradžios iki pabaigos. Waze parenka savo maršrutą, kuris gali
+              skirtis nuo mūsų žemėlapyje rodomo kelio.
             </li>
             <li>
               <b>Viešasis transportas:</b> tikri tvarkaraščiai. Ieškome greičiausios kelionės (RAPTOR algoritmas) su iki 4 persėdimų, ėjimu iki stotelės (≈ 4,5 km/h) ir minute
@@ -176,7 +177,14 @@ export default function About() {
             <li>
               <b>Paspirtukas:</b> ėjimas iki artimiausio laisvo paspirtuko, ≈ 17 km/h važiuojant, 1 min. pastatyti. Bolt ir kiti operatoriai Lietuvoje
               neskelbia atvirų GBFS duomenų (Bolt viešai juos teikia tik keliems miestams užsienyje). Kol negauta prieiga, bandomojoje versijoje
-              rodomi aiškiai pažymėti <b>DEMO</b> paspirtukai, o tikrojoje – vertinimas (≈ 3 min. rasti paspirtuką).
+              rodomi aiškiai pažymėti <b>DEMO</b> paspirtukai, o tikrojoje – vertinimas (≈ 3 min. rasti paspirtuką). Pažymėjus „Turiu savo paspirtuką“ –
+              važiuojama nuo A dviračių maršrutu ≈ 17 km/h, 1,5 min. jį išlankstyti ir pastatyti, be nuomos.
+            </li>
+            <li>
+              <b>Deriniai su automobiliu:</b> automobilis paliekamas šalia kitos priemonės – stotelė ≤ 300 m tiesiai (≤ 450 m gatvėmis), Cyclocity
+              stotelė ≤ 200 m, laisvas paspirtukas ≤ 150 m (be operatoriaus duomenų – JUDU paspirtukų vieta). Važiavimas turi baigtis pačioje stovėjimo
+              vietoje: jei maršrutas jos nepasiekia (sustoja kitame kelyje toliau nei 75 m), vieta nesiūloma. Su savu paspirtuku automobilį galima palikti
+              bet kur pigiai pakeliui. Važiavimo iki ten laikas – OSRM, pakoreguotas pagal eismą kelyje A → B.
             </li>
             <li>
               <b>Dviratis ir pėsčiomis:</b> Valhalla dviračio („hibridinis“ dviratis, renkasi dviračių takus ir ramesnes gatves) ir pėsčiųjų maršrutai; jei
@@ -204,7 +212,9 @@ export default function About() {
               (JUDU, UNIPARK, prekybos centrų, OpenStreetMap) ir, elektromobiliams, įkrovimo vietas. Kiekvienai paskaičiuojame jūsų stovėjimo kainą: mokama tik
               tai, kas patenka į mokamą laiką, įskaitant nemokamas pirmąsias minutes, brangesnę pirmą valandą (mėlynoji zona), tarifus pagal laiką ir dieną,
               paros maksimumą ir apvalinimą (pvz. „už kiekvieną pradėtą valandą“). P+R – 1 € dienai su viešuoju transportu. Jei taisyklių nežinome, kaina
-              rodoma „?“ ir tokia vieta automatiškai nesiūloma – niekada nelaikome jos nemokama.
+              rodoma „?“ ir tokia vieta automatiškai nesiūloma – niekada nelaikome jos nemokama. Mokamų zonų atvirus duomenis skelbia tik Vilnius ir
+              Klaipėda, todėl kitų miestų centruose (Kaunas, Šiauliai, Panevėžys, kurortai…) gatvė laikoma „kaina nežinoma“; jei geresnės vietos nėra,
+              kelionės suma rodoma su „≥“. Derinyje automobilis stovi ilgiau nei buvimas tiksle – mokame ir už antrą atkarpą ten bei atgal.
             </li>
             <li>
               <b>Kur palikti automobilį:</b> pagal prioritetą sveriame kainą, ėjimą ir vietos paiešką (subalansuotai minutė – 0,15 €) bei tikimybę rasti vietą;

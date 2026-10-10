@@ -11,13 +11,18 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 
 - A / B: adresų ir stotelių paieška rašant, smeigtukas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
 - Išvykimas dabar arba pasirinktu laiku
+- **Kuo keliausite:** po A ir B – žymimieji langeliai „Automobilis“, „Viešasis tr.“, „Paspirtukas“, „Dviratis“ (ir „Turiu savo paspirtuką / dviratį“).
+  Rodomi tik būdai, naudojantys vien pažymėtas priemones (ėjimas – kartu su visais; vien pėsčiomis – kai iki 15 min.). Pasirinkimas saugomas profilyje
+- Visi būdai rodomi vienodai: laikas, kaina · CO₂ ir etapų juosta. Pavieniai būdai – kortelės greta, deriniai su automobiliu – viena kortelė su rodyklėmis.
+  Pasirinkus bet kurį – tas pats etapų sąrašas (laikas, veiksmas, keli faktai) su Waze arba Google Maps mygtuku kiekvienam etapui, po juo kaina ir palyginimas su automobiliu
 - **Automobilis:** TomTom Orbis maršrutas su dabartiniu arba prognozuojamu eismu pagal išvykimo laiką; be rakto ar paslaugai neveikiant – pažymėtas OSRM / Via Lietuva atsarginis vertinimas.
   Pasirinkus parkavimą perskaičiuojama tik važiavimo atkarpa iki tos vietos; atskirai rodomas ėjimas iki automobilio, vietos paieška ir ėjimas iki B. Meteo.lt orų perspėjimai nekeičia ETA. Waze mygtukas atidaro važiavimą į pasirinktą vietą.
 - **Viešasis transportas:** visos Lietuvos tvarkaraščiai (miestai, rajonai, tarpmiestiniai), RAPTOR maršrutizavimas su
   persėdimais, kiek kelio eina gatvėmis su A juosta, bilieto kaina pagal miestą, kitas reisas
 - **Cyclocity dviratis (Vilnius):** gyvi GBFS duomenys – artimiausia stotelė su laisvu dviračiu, stotelė prie B su laisva vieta
 - **Paspirtukai:** žemėlapio sluoksnis ir maršrutas iki artimiausio paspirtuko. Tikrų duomenų kol kas nėra (Bolt ir kt.
-  Lietuvoje atvirų GBFS neskelbia), todėl preview aplinkoje rodomi aiškiai pažymėti **DEMO** duomenys – žr. „Paspirtukų duomenys“
+  Lietuvoje atvirų GBFS neskelbia), todėl preview aplinkoje rodomi aiškiai pažymėti **DEMO** duomenys – žr. „Paspirtukų duomenys“.
+  **Savas paspirtukas:** važiuojama nuo A dviračių maršrutu ≈ 17 km/h, nieko nenuomojant (0 €)
 - **Dviratis ir pėsčiomis:** laikas, sudeginamos kalorijos
 - **Orai:** Meteo.lt prognozė ir Open-Meteo lietaus tikimybė kelionės pradžioje – kompaktiška žymė žemėlapyje; paspaudus išskleidžiama prognozė.
   Kelionės pasirinkimuose rodomi tik tinkami būdai: per ilgi ir dėl prastų orų nerekomenduojami variantai paslepiami, įskaitant derinius su automobiliu.
@@ -30,9 +35,13 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
   Kai stovėjimo vietos tik vienoje gatvės pusėje, maršrutas atveda iš tos pusės (TomTom `arrivalSidePreference: curbSide`,
   OSRM `approaches=curb`; vienos krypties gatvėse kairė pusė leidžiama, KET 142). Waze pasirenka savo maršrutą
 - **Deriniai su automobiliu:** dalį kelio automobiliu, tada VT, Cyclocity ar paspirtuku. Automobilis paliekamas P+R (1 € su VT visai dienai),
-  pigioje ar nemokamoje aikštelėje / gatvėje, elektromobiliui – prie tinkamo įkroviklio, ir visada šalia kitos transporto priemonės
-  (stotelės, Cyclocity stotelės, JUDU paspirtukų vietos). Kaina apima ir grįžimą iki automobilio. Geriausias derinys rodomas sąraše tik
-  kai lenkia važiavimą iki pat tikslo, kiti – „Kiti deriniai“. Senamiestyje paspirtukas paliekamas pažymėtoje vietoje
+  pigioje ar nemokamoje aikštelėje / gatvėje, elektromobiliui – prie tinkamo įkroviklio, ir visada šalia kitos transporto priemonės:
+  stotelė ≤ 300 m (≤ 450 m gatvėmis), Cyclocity stotelė ≤ 200 m, laisvas paspirtukas ≤ 150 m (be operatoriaus duomenų – JUDU paspirtukų vieta).
+  Važiavimas turi baigtis pačioje stovėjimo vietoje: jei maršrutas jos nepasiekia (sustoja kitame kelyje > 75 m), vieta nesiūloma.
+  Su savu paspirtuku automobilį galima palikti bet kur pigiai pakeliui. Stovėjimo kaina – už buvimą tiksle ir antrą atkarpą ten bei atgal;
+  kaina apima ir grįžimą iki automobilio. Deriniai – vienoje kortelėje, geriausias pirmas, kiti – rodyklėmis. Senamiestyje nuomojamas paspirtukas paliekamas pažymėtoje vietoje
+- **Nežinoma kaina niekada nerodoma kaip nemokama:** Kauno, Šiaulių, Panevėžio ir kitų miestų centrų mokamų zonų atvirų duomenų nėra, todėl gatvė ten
+  laikoma „kaina nežinoma“, o suma rodoma su „≥“
 - **Kiek stovės automobilis** spėjama, ne klausiama: pagal tai, ką vartotojas pataisė anksčiau šiai vietai ir laikui, kaip ilgai iš tikrųjų
   stovėjo (vėlesnė kelionė iš tos pačios vietos), kokia tai vieta (biuras ryte – darbo diena, prekybos centras – 2 val.) ir paros laiką.
   Viskas saugoma tik naršyklėje
@@ -168,7 +177,9 @@ o serveriams neatsakant jie 30 s neklausiami (deriniai tada naudoja tiesios lini
 - `lib/departure.ts`, `driving.ts` – Lithuanian time conversion, car-leg projection and Waze links
 - `lib/server/osrm.ts`, `lanes.ts` – gatvių maršrutai, A juostos
 - `lib/server/parking.ts` – parkavimo vietos prie B (zonos, gatvės, aikštelės, įkrovimas) ir `hubsAround` – kur palikti automobilį pakeliui; `live-parking.ts` – gyvi JUDU ir įkrovimo duomenys
-- `lib/server/hybrid.ts`, `app/api/hybrid` – deriniai su automobiliu; `components/planner/HybridCard.tsx`, `useHybrids.ts` – jų kortelės
+- `lib/server/hybrid.ts`, `app/api/hybrid` – deriniai su automobiliu; `useHybrids.ts` – jų užklausa
+- `components/planner/stages.ts` – bet kurio būdo etapai (su Waze / Google Maps nuorodomis); `Options.tsx` – kortelės ir derinių karuselė;
+  `TripDetails.tsx` – pasirinkto būdo etapai ir kaina; `TravelModes.tsx` – „Kuo keliausite?“
 - `lib/stay.ts`, `components/planner/habits.ts` – kiek stovės automobilis (vieta, laikas, įpročiai naršyklėje)
 - `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko maršrutas
 - `lib/server/scooters.ts` – paspirtukų srautas (GBFS arba DEMO)

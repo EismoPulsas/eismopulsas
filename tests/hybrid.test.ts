@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { LatLng } from "../lib/geo";
-import { DEFAULT_SETTINGS, rank, summarizeHybrids, SWITCH_PENALTY_SEC, type Settings } from "../lib/metrics";
+import {
+  DEFAULT_SETTINGS,
+  hubStayHours,
+  hybridKinds,
+  modeAllowed,
+  OWN_SCOOTER_CO2_KM,
+  rank,
+  summarize,
+  summarizeHybrids,
+  SWITCH_PENALTY_SEC,
+  withOwnScooter,
+  type Settings,
+} from "../lib/metrics";
 import type { HybridOption, Lot, ParkingOption, PlanResponse, RideLeg, ScooterResult, TransitResult } from "../lib/plan-types";
 import { estimateStay, stayBucket, type StayHabits } from "../lib/stay";
 import { osrmRoute } from "../lib/server/osrm";
@@ -139,8 +151,82 @@ test("free car park + bus or scooter: the way back to the car is paid too", () =
   // A bad-weather day rules the scooter out, never the bus.
   const wet = summarizeHybrids({ ...plan, weather: { risk: "bad", reasons: ["lietus"] } } as unknown as PlanResponse, [option(hubOf(freeLot), { kind: "scooter", scooter })], settings);
   assert.match(wet[0].weatherWarning!, /lietus/);
-  // Modes the user switched off in the profile are not offered.
-  assert.equal(summarizeHybrids(plan, [option(hubOf(freeLot), { kind: "scooter", scooter })], { ...settings, hybridModes: ["transit"] }).length, 0);
+  // Vehicles the user did not tick under A and B are not offered.
+  assert.equal(summarizeHybrids(plan, [option(hubOf(freeLot), { kind: "scooter", scooter })], { ...settings, travel: ["car", "transit"] }).length, 0);
+  assert.equal(summarizeHybrids(plan, [option(hubOf(freeLot), { kind: "transit", transit: transit("vilnius") })], { ...settings, travel: ["transit"] }).length, 0);
+});
+
+test("the car stands at the hub for the stay and the second leg both ways, and is priced for all of it", () => {
+  const hourly = { ...prLot, id: "hourly", access: "public", t: { known: true, text: ["1 €/val."], rates: [{ rules: null, perHour: 1 }] } } as Lot;
+  // Parked 8:12, leaves 8:13, arrives 8:42: 29 min away, so 9 h + 58 min at the car park.
+  const o = option(hubOf(hourly), { kind: "transit", transit: transit("vilnius") });
+  assert.ok(Math.abs(hubStayHours(o, settings) - (9 + 58 / 60)) < 1e-9);
+  const [h] = summarizeHybrids(plan, [o], settings);
+  assert.equal(h.costLines.find((l) => l.label === "Parkavimas: P+R")!.value, 9.97); // 598 min at 1 €/h, not just the 9 h stay
+});
+
+test("own scooter: nothing to rent, nothing to pay on the way back", () => {
+  const own: ScooterResult = { ...scooter, source: "own" };
+  const [h] = summarizeHybrids(plan, [option(hubOf(freeLot), { kind: "scooter", scooter: own })], { ...settings, ownScooter: true });
+  assert.equal(h.cost, h.costLines[0].value); // fuel only: free car park, own scooter
+  assert.ok(!h.costLines.some((l) => l.label === "Grįžtant iki automobilio"));
+  assert.ok(Math.abs(h.co2 - ((4 * settings.consumption) / 100) * 2.31 - 2.5 * OWN_SCOOTER_CO2_KM) < 1e-9);
+});
+
+const fullPlan = (over: Partial<PlanResponse> = {}): PlanResponse =>
+  ({
+    ...plan,
+    from: [54.73, 25.22],
+    to: B,
+    car: null,
+    transit: transit("vilnius"),
+    bike: { distance: 3400, duration: 900, geometry: [] },
+    walk: { distance: 1000, duration: 800, geometry: [] },
+    bikeshare: null,
+    scooter: { ...scooter, source: "demo" },
+    ...over,
+  }) as PlanResponse;
+
+test("vehicles picked under A and B: only options using them alone, plus a short walk", () => {
+  const p = fullPlan();
+  const shown = (s: Settings) => summarize(p, s).filter((m) => modeAllowed(m, s)).map((m) => m.id);
+  assert.deepEqual(shown({ ...settings, travel: ["transit"] }), ["transit", "walk"]);
+  assert.deepEqual(shown({ ...settings, travel: ["transit", "scooter"] }), ["transit", "scooter", "walk"]);
+  // A long walk is not a "vehicle": it goes away once it takes longer than a quarter of an hour.
+  assert.deepEqual(summarize(fullPlan({ walk: { distance: 2400, duration: 1900, geometry: [] } }), settings).filter((m) => modeAllowed(m, { ...settings, travel: ["transit"] })).map((m) => m.id), ["transit"]);
+  // Bike: own bike or Cyclocity, never both.
+  assert.ok(modeAllowed({ id: "bike", duration: 900 }, { ...settings, ownBike: true }));
+  assert.ok(!modeAllowed({ id: "bikeshare", duration: 900 }, { ...settings, ownBike: true }));
+  // No car in the profile, or the car unticked: no combinations either.
+  assert.deepEqual(hybridKinds({ ...settings, travel: ["transit", "scooter"] }), []);
+  assert.deepEqual(hybridKinds({ ...settings, hasCar: false }), []);
+  assert.deepEqual(hybridKinds({ ...settings, travel: ["car", "scooter"] }), ["scooter"]);
+});
+
+test("own scooter from A: the bike route at scooter speed, free", () => {
+  const p = withOwnScooter(fullPlan());
+  assert.equal(p.scooter!.source, "own");
+  assert.equal(p.scooter!.vehicle, null);
+  assert.equal(p.scooter!.distance, 3400);
+  const m = summarize(p, settings).find((x) => x.id === "scooter")!;
+  assert.equal(m.cost, 0);
+  assert.equal(m.duration, Math.round(3400 / (17 / 3.6)) + 90);
+});
+
+test("parking: an unknown price is never shown as free", () => {
+  const atB: ParkingOption = { kind: "zone", id: "zone", name: "Gatvėje prie tikslo", pos: B, walk: 0, zone: null, zoneUnknown: true };
+  const car = {
+    drive: { duration: 900, distance: 8000, to: B, arrivalAt: "2026-10-12T05:17:00.000Z", traffic: {} },
+    distance: 8000,
+    duration: 1200,
+    overhead: 300,
+    parking: null,
+    parkingOptions: [atB],
+  } as unknown as NonNullable<PlanResponse["car"]>;
+  const m = summarize(fullPlan({ car }), settings).find((x) => x.id === "car")!;
+  assert.equal(m.costUnknown, true);
+  assert.ok(m.costLines.some((l) => l.unknown && /kainų neturime/.test(l.note ?? "")));
+  assert.equal(m.parking?.option.id, "zone"); // still parked at B, just without a price
 });
 
 test("ranking: a change of vehicle costs a little comfort, so a tie goes to the direct option", () => {

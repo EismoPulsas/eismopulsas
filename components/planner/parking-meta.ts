@@ -1,7 +1,27 @@
 import type { LatLng } from "@/lib/geo";
+import { lotRateAt } from "@/lib/metrics";
 import type { Charger, Lot, ParkingZone } from "@/lib/plan-types";
 
 // Shared by the map (Leaflet, browser-only) and the panels; keep Leaflet out of here.
+
+/**
+ * The moment prices and spaces are shown for: arrival at B once a trip is planned, else the
+ * chosen departure time, else now. `sec` counts from local midnight of `date` (may pass 24 h).
+ */
+export type When = { date: string; sec: number; isNow: boolean };
+
+/** Weekday (0 = Monday) and hour of a moment, as in the occupancy profiles. */
+export function slotOf(w: When): [number, number] {
+  const wd = (new Date(`${w.date}T00:00:00Z`).getUTCDay() + 6 + Math.floor(w.sec / 86400)) % 7;
+  return [wd, Math.floor((((w.sec % 86400) + 86400) % 86400) / 3600)];
+}
+
+const WD_SHORT = ["Pr", "An", "Tr", "Kt", "Pn", "Š", "S"];
+/** "Tr 18:36" */
+export function whenLabel(w: When): string {
+  const s = ((w.sec % 86400) + 86400) % 86400;
+  return `${WD_SHORT[slotOf(w)[0]]} ${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
+}
 
 export type Zone = ParkingZone & { poly: LatLng[][][] };
 export type Area = { name: string; spaces: number | null; occupancy: number | null; poly: LatLng[][][] };
@@ -62,7 +82,23 @@ export const LOT_CLASS = {
   pr: { color: "#f59e0b", label: "P+R" },
   unknown: { color: "#94a3b8", label: "Taisyklės nežinomos" },
 } as const;
-export const lotClass = (l: Lot): keyof typeof LOT_CLASS => (l.access === "pr" ? "pr" : !l.t.known ? "unknown" : l.t.free ? "free" : "paid");
+/** With a moment: a car park whose rates do not apply then (evening, weekend) is free then. */
+export function lotClass(l: Pick<Lot, "access" | "t">, when?: When | null): keyof typeof LOT_CLASS {
+  if (l.access === "pr") return "pr";
+  if (!l.t.known) return "unknown";
+  if (l.t.free) return "free";
+  return when && lotRateAt(l.t, when.date, when.sec) === 0 ? "free" : "paid";
+}
+
+/** Price as a plate label at that moment, when the rules are simple enough to say in one number. */
+export function lotLabel(l: Pick<Lot, "t">, when?: When | null): string | null {
+  const t = l.t;
+  if (!t.known) return null;
+  if (t.flat) return `${t.flat.price.toLocaleString("lt-LT")} €`;
+  const h = when ? lotRateAt(t, when.date, when.sec) : t.free ? 0 : (t.tiers?.[0]?.perHour ?? t.rates?.[0]?.perHour);
+  if (h == null) return null;
+  return h === 0 ? "0 €" : `${h.toLocaleString("lt-LT", { maximumFractionDigits: 2 })} €/h`;
+}
 
 export const SOURCE_LABEL: Record<Lot["src"], string> = {
   judu: "JUDU",

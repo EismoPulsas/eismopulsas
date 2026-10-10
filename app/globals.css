@@ -195,7 +195,8 @@ body {
   font-size: 14px;
   outline: none;
 }
-.field:focus {
+.field:focus,
+.field:focus-within {
   border-color: var(--marking);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--marking) 22%, transparent);
 }

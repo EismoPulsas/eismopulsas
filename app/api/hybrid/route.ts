@@ -2,11 +2,12 @@
 //
 //   GET /api/hybrid?from=54.7329,25.2236&to=54.7228,25.3375&depart=2026-10-12T05:00:00.000Z
 //       &car=1260&stay=9[&ev=1&conn=T2,CCS&ac=11&dc=100&bat=60&permit=1][&prio=cheap]
-//       [&modes=transit,bikeshare,scooter][&su=0.5&sm=0.15]
+//       [&modes=transit,bikeshare,scooter][&own=1][&su=0.5&sm=0.15]
 //
 // `depart` is the door departure (as /api/plan returns it), `car` the driving A → B
-// seconds with traffic, `stay` how long the car will stand (hours). Prices and the final
-// ranking are worked out in the browser (lib/metrics.ts › summarizeHybrids).
+// seconds with traffic, `stay` how long the car will stand (hours), `own=1` the user rides
+// their own scooter. Prices and the final ranking are worked out in the browser
+// (lib/metrics.ts › summarizeHybrids).
 
 import { inLithuania } from "@/lib/geo";
 import { departure } from "@/lib/departure";
@@ -47,13 +48,14 @@ export async function GET(req: Request) {
     batteryKwh: num(q.get("bat"), 5, 200, DEFAULT_SETTINGS.batteryKwh),
     evPermit: q.get("permit") === "1",
     priority: PRIORITIES.find((p) => p === q.get("prio")) ?? "balanced",
-    hybridModes: q.has("modes") ? KINDS.filter((k) => q.get("modes")!.split(",").includes(k)) : KINDS,
+    ownScooter: q.get("own") === "1",
     scooterUnlock: num(q.get("su"), 0, 5, DEFAULT_SETTINGS.scooterUnlock),
     scooterPerMin: num(q.get("sm"), 0, 2, DEFAULT_SETTINGS.scooterPerMin),
   };
   if (!settings.connectors.length) settings.connectors = DEFAULT_SETTINGS.connectors;
+  const kinds = q.has("modes") ? KINDS.filter((k) => q.get("modes")!.split(",").includes(k)) : KINDS;
   const carSec = q.has("car") ? num(q.get("car"), 60, 6 * 3600, 0) : null;
   const live = depart.isNow ? await liveLots() : null;
-  const body = await planHybrids({ from, to, depart, carSec, settings, live });
+  const body = await planHybrids({ from, to, depart, carSec, kinds, settings, live });
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

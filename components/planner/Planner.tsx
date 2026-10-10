@@ -8,12 +8,17 @@ import { inLithuania, type LatLng } from "@/lib/geo";
 import {
   bestParking,
   DEFAULT_SETTINGS,
+  hybridKinds,
   isEv,
   isHybridId,
+  modeAllowed,
   parkingEvals,
+  prefersCharge,
   rank,
   summarize,
   summarizeHybrids,
+  TRAVEL_MODES,
+  withOwnScooter,
   type HybridSummary,
   type ModeId,
   type ModeSummary,
@@ -23,22 +28,26 @@ import { estimateStay, type StayEstimate } from "@/lib/stay";
 import type { PlanResponse } from "@/lib/plan-types";
 import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
-import { fmtClock, MODE_META } from "./format";
-import { ChevronIcon, GearIcon, SwapIcon } from "./icons";
+import { fmtClock } from "./format";
+import { BikeIcon, BusIcon, CarIcon, ChevronIcon, GearIcon, ScooterIcon, SwapIcon } from "./icons";
 import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
+import { HybridCarousel, OptionTiles } from "./Options";
 import { ParkingCard } from "./ParkingCard";
-import type { MapPick } from "./parking-meta";
+import type { MapPick, When } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
-import { HybridCard, hybridTitle, MoreHybrids, StayLine } from "./HybridCard";
+import { StayLine } from "./HybridCard";
 import { usualTrip, useHabits } from "./habits";
-import { ModeExtras, signals, type Signals } from "./Results";
+import { signals, type Signals } from "./Results";
 import { Savings } from "./Savings";
 import { useSettings } from "./settings";
+import { tripNav, tripOf, type AnyOption } from "./stages";
+import { TravelModes, travelOn } from "./TravelModes";
+import { TripDetails } from "./TripDetails";
 import { useCarDrive } from "./useCarDrive";
 import { useHybrids } from "./useHybrids";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
-import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps } from "./Trip";
+import { LiveStatus, NavButton, NowClock } from "./Trip";
 
 /** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
 const PANEL_LEFT = 24 + 560;
@@ -114,14 +123,22 @@ export default function Planner() {
     return estimateStay({ to: to.pos, cat: to.cat, weekday: currentPlan.depart.weekday, arriveSec, habits, profileHours: settings.parkingHours });
   }, [currentPlan, to, stayPick, queryKey, arriveSec, habits, settings.parkingHours]);
   const tripSettings = useMemo(() => (stay ? { ...settings, parkingHours: stay.hours } : settings), [settings, stay]);
+  // Parking prices and free spaces on the map and in place cards are for the arrival at B,
+  // or the chosen departure time, or now: a zone paid at that time is never shown as free.
+  const when = useMemo((): When => {
+    if (currentPlan) return { date: currentPlan.depart.date, sec: arriveSec, isNow: currentPlan.depart.isNow };
+    const [date, time] = (departAt ?? localNow()).split("T");
+    return { date, sec: +time.slice(0, 2) * 3600 + +time.slice(3, 5) * 60, isNow: !departAt };
+  }, [currentPlan, arriveSec, departAt]);
   // Refreshed driving times must not silently change the chosen destination.
   const chosenParking = useMemo(() => {
     if (!currentPlan?.car) return undefined;
     const options = parkingEvals(currentPlan, tripSettings);
-    return (options.find((p) => p.option.id === parkingId) ?? bestParking(options, tripSettings.priority))?.option;
+    return (options.find((p) => p.option.id === parkingId) ?? bestParking(options, tripSettings.priority, prefersCharge(tripSettings)))?.option;
   }, [currentPlan, tripSettings, parkingId]);
   const driving = useCarDrive(currentPlan, chosenParking, refresh, settings.maxWalkMin, !loading);
-  const plan = driving.plan;
+  // With their own scooter the user rides from A: the shared-scooter search is replaced.
+  const plan = useMemo(() => (driving.plan && settings.ownScooter ? withOwnScooter(driving.plan) : driving.plan), [driving.plan, settings.ownScooter]);
   const updatingCar = loading || driving.pending;
   // Phones: the search card collapses to one line once there are results.
   const [editing, setEditing] = useState(true);
@@ -212,9 +229,10 @@ export default function Planner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, refresh]);
 
+  // Only the ways the user can and wants to travel: feasible, fine in this weather, by the vehicles picked under A and B.
   const modes = useMemo(() => (plan ? summarize(plan, tripSettings, chosenParking?.id).map((m) =>
     m.id === "car" && (updatingCar || driving.error) ? { ...m, feasible: false, why: driving.error ?? "Atnaujinamas važiavimo laikas…" } : m)
-    .filter((m) => m.feasible && !m.weatherWarning) : []),
+    .filter((m) => m.feasible && !m.weatherWarning && modeAllowed(m, tripSettings)) : []),
     [plan, tripSettings, chosenParking?.id, updatingCar, driving.error]);
   // Car + second leg: leave the car on the way (P+R, cheap parking, a charger) and continue.
   const hybridState = useHybrids(currentPlan, tripSettings, !loading);
@@ -225,23 +243,28 @@ export default function Planner() {
     const all = [...modes, ...hybrids];
     return { duration: signals(all, "duration"), cost: signals(all, "cost"), co2: signals(all, "co2") };
   }, [modes, hybrids]);
-  // The best combination is shown first only when it beats driving all the way; the rest fold away.
+  // Combinations share one card: the best first, arrows for the rest.
   const hybridOrder = useMemo(() => [...hybrids].sort((a, b) => (ranking.scores.get(a.id) ?? Infinity) - (ranking.scores.get(b.id) ?? Infinity)), [hybrids, ranking]);
-  const carScore = ranking.scores.get("car");
-  const topHybrid = hybridOrder[0] && ranking.scores.has(hybridOrder[0].id) && (carScore === undefined || ranking.scores.get(hybridOrder[0].id)! < carScore) ? hybridOrder[0] : null;
-  const moreHybrids = hybridOrder.filter((h) => h !== topHybrid);
-  const selectedHybrid = isHybridId(selected) ? hybrids.find((h) => h.id === selected) : undefined;
+  /** The combination flipped to without choosing it; a new list (other vehicles, new trip) starts again at the best. */
+  const [hybridPeek, setHybridPeek] = useState<string | null>(null);
+  // The chosen way; when it is filtered out (vehicles unticked), the recommended one.
+  const current: AnyOption | null = useMemo(() => {
+    const all: AnyOption[] = [...modes, ...hybrids];
+    return all.find((o) => o.id === selected) ?? all.find((o) => o.id === ranking.best) ?? modes[0] ?? hybridOrder[0] ?? null;
+  }, [modes, hybrids, hybridOrder, selected, ranking.best]);
+  const selectedHybrid = current && isHybridId(current.id) ? (current as HybridSummary) : undefined;
   const carPark = modes.find((m) => m.id === "car")?.parking?.option;
 
-  // Open the winner (once combinations are in) and compare the car against the best alternative.
+  // Open the winner and compare the car against the best alternative, once the combinations and
+  // the car's drive are in (a new priority moves the parking, so the car is routed again).
   useEffect(() => {
-    if (!plan || !hybridState.settled) return;
+    if (!plan || !hybridState.settled || updatingCar) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelected((prev) => (prev && !isHybridId(prev) && ranking.scores.has(prev) ? prev : null) ?? ranking.best);
     const alts = [...ranking.scores].filter(([id]) => id !== "car" && !isHybridId(id)).sort((a, b) => a[1] - b[1]);
     if (alts.length) setAlt(alts[0][0] as Exclude<ModeId, "car">);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basePlan, hybridState.settled]);
+  }, [basePlan, hybridState.settled, updatingCar, settings.priority]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -296,11 +319,12 @@ export default function Planner() {
   };
 
   // Picking a way turns on the map layer it needs (parking for the car, stations for Cyclocity…).
-  const MODE_LAYER: Partial<Record<ModeId, keyof Layers>> = { car: "parking", bikeshare: "bikeshare", scooter: "scooters" };
+  const MODE_LAYER: Partial<Record<ModeId, keyof Layers>> = { car: "parking", bikeshare: "bikeshare", ...(settings.ownScooter ? {} : { scooter: "scooters" as const }) };
   const selectMode = (m: OptionId) => {
     setSelected(m);
-    const need = isHybridId(m) ? undefined : MODE_LAYER[m];
-    if (need && !layers[need]) setLayers({ ...layers, [need]: true });
+    // An EV's car trip also shows where it can charge.
+    const need = isHybridId(m) ? [] : [MODE_LAYER[m], m === "car" && ev ? ("charging" as const) : undefined].filter((l): l is keyof Layers => !!l && !layers[l]);
+    if (need.length) setLayers({ ...layers, ...Object.fromEntries(need.map((l) => [l, true])) });
     if (snap === "peek") setSnap("half");
     const opt = [...modes, ...hybrids].find((x) => x.id === m);
     if (plan && from && to && opt && selected !== m)
@@ -322,9 +346,18 @@ export default function Planner() {
   // The badge waits for combinations (≤ 2,5 s) so it does not jump from one card to another.
   const best = hybridState.settled ? ranking.best : null;
   const bestMode = isHybridId(best) ? null : best;
-  const bestHybrid = isHybridId(best) ? hybrids.find((h) => h.id === best) : undefined;
   const car = modes.find((m) => m.id === "car");
-  const sel = selectedHybrid ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === ranking.best) ?? modes[0] ?? null);
+  const sel = current && !isHybridId(current.id) ? (current as ModeSummary) : null;
+  const nav = plan && current ? tripNav(plan, current, tripOf(plan, current)) : null;
+  // The carousel follows the chosen combination; otherwise it keeps where the user flipped to.
+  const shownHybrid = Math.max(0, hybridOrder.findIndex((h) => h.id === (selectedHybrid?.id ?? hybridPeek)));
+  const flipHybrid = (i: number) => {
+    const h = hybridOrder[i];
+    if (!h) return;
+    setHybridPeek(h.id);
+    if (selectedHybrid) selectMode(h.id);
+  };
+  const carWanted = travelOn(tripSettings, "car");
   const collapsed = !!plan && !editing;
   const showRouteScope = !!plan && (layers.parking || layers.bikeshare || layers.scooters || (ev && layers.charging));
 
@@ -344,7 +377,7 @@ export default function Planner() {
           from={from?.pos ?? null}
           to={to?.pos ?? null}
           plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
-          selected={selectedHybrid?.id ?? sel?.id ?? null}
+          selected={current?.id ?? null}
           hybrid={selectedHybrid?.hybrid ?? null}
           layers={layers}
           picking={!!picking || !from || !to}
@@ -353,6 +386,7 @@ export default function Planner() {
           connectors={settings.connectors}
           parkingSpot={carPark && carPark.kind !== "zone" ? { pos: carPark.navigationPos ?? carPark.pos, name: carPark.name } : null}
           picked={picked}
+          when={when}
           padding={{ top: phone ? topPx : 0, bottom: phone ? sheetPx : 0, left: phone ? 0 : PANEL_LEFT }}
           onLayers={setLayers}
           onPick={onMapPick}
@@ -382,6 +416,7 @@ export default function Planner() {
               pick={picked}
               live={live}
               settings={settings}
+              when={when}
               onClose={() => setPicked(null)}
               onGo={(p) => {
                 setPicked(null);
@@ -427,7 +462,14 @@ export default function Planner() {
                 <span className="block truncate text-sm font-semibold">
                   {from?.label} <span className="text-[var(--muted)]">→</span> {to?.label}
                 </span>
-                <span className="block text-xs text-[var(--muted)]">{departAt ? departAt.replace("T", " ") : "Išvykti dabar"} · keisti</span>
+                <span className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                  {departAt ? departAt.replace("T", " ") : "Išvykti dabar"} ·
+                  {TRAVEL_MODES.filter((m) => travelOn(settings, m)).map((m) => {
+                    const Icon = { car: CarIcon, transit: BusIcon, scooter: ScooterIcon, bike: BikeIcon }[m];
+                    return <Icon key={m} size={14} />;
+                  })}
+                  · keisti
+                </span>
               </span>
               <ChevronIcon className="shrink-0 text-[var(--muted)]" />
             </button>
@@ -509,6 +551,16 @@ export default function Planner() {
                 )}
               </div>
               {picking && <p className="mt-2 text-xs text-[var(--marking)]">Bakstelėkite žemėlapyje, kur yra {picking === "from" ? "A" : "B"} taškas.</p>}
+              <div className="mt-3 border-t border-[var(--line)] pt-2.5">
+                <TravelModes
+                  s={settings}
+                  onChange={(next) => {
+                    setSettings(next);
+                    // Ticking "electric" with parking on the map brings the chargers in too.
+                    if (isEv(next) && !ev && layers.parking && !layers.charging) setLayers({ ...layers, charging: true });
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -551,19 +603,19 @@ export default function Planner() {
 
             {plan && (
               <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="eyebrow">Multimodalinė matrica</span>
-                  {best && (
-                    <span className="rounded-full border border-[#a7f3d0] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--marking)]">
-                      Rekomenduojama: {bestHybrid ? hybridTitle(bestHybrid) : bestMode ? MODE_META[bestMode].short : ""}
-                    </span>
-                  )}
-                </div>
-
                 <div className="flex items-center gap-2">
-                  <div className="seg flex-1" role="group" aria-label="Kas svarbiausia?">
+                  <div className="seg min-w-0 flex-1 [&>button]:px-1 sm:[&>button]:px-2" role="group" aria-label="Kas svarbiausia?">
                     {PRIORITIES.map((p) => (
-                      <button key={p.id} type="button" aria-pressed={settings.priority === p.id} onClick={() => setSettings({ ...settings, priority: p.id })}>
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={settings.priority === p.id}
+                        onClick={() => {
+                          setSettings({ ...settings, priority: p.id });
+                          // Show this priority's winner (followed live while it is recomputed), not the last pick.
+                          setSelected(null);
+                        }}
+                      >
                         {p.label}
                       </button>
                     ))}
@@ -582,20 +634,13 @@ export default function Planner() {
                     </svg>
                   </button>
                 </div>
+                {stay && plan.car && carWanted && <StayLine stay={stay} onPick={pickStay} />}
 
-                <ModeMatrix plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} onSelect={selectMode} />
-                {!modes.length && !hybrids.length && !updatingCar && hybridState.settled && (
-                  <p role="status" className="rounded-xl bg-[var(--chip)] p-3 text-sm text-[var(--muted)]">
-                    Šiai kelionei tinkamų būdų neradome. Pabandykite kitą išvykimo laiką arba pakeiskite kelionės nustatymus.
-                  </p>
-                )}
-                {driving.error && <p role="status" className="text-sm text-[var(--stop)]">{driving.error}</p>}
-                {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
-
-                {/* Car + second leg (P+R, VT, Cyclocity, scooter): the best one open, the rest folded. */}
-                {topHybrid ? (
-                  <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
-                ) : !hybridState.settled && settings.hasCar ? (
+                {/* Single ways side by side; car + second leg in one card with arrows; all drawn the same. */}
+                {modes.length > 0 && <OptionTiles plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} sig={sig} onSelect={selectMode} />}
+                {hybridOrder.length > 0 ? (
+                  <HybridCarousel plan={plan} items={hybridOrder} index={shownHybrid} onIndex={flipHybrid} best={best} selected={selectedHybrid?.id ?? null} sig={sig} onSelect={(h) => selectMode(h.id)} />
+                ) : !hybridState.settled && hybridKinds(tripSettings).length > 0 ? (
                   <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--line)] px-3 py-2.5 text-sm text-[var(--muted)]" role="status">
                     <span className="traffic-light scale-75" aria-hidden>
                       <i />
@@ -605,35 +650,35 @@ export default function Planner() {
                     Ieškome derinių su automobiliu…
                   </div>
                 ) : null}
-                <MoreHybrids
-                  items={moreHybrids}
-                  selected={selected}
-                  onSelect={selectMode}
-                  render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open sig={sig} onSelect={() => selectMode(h.id)} />}
-                />
-                {hybridState.note && hybrids.length > 0 && <p className="text-[11px] text-[var(--muted)]">{hybridState.note}</p>}
-                {!plan.transit && plan.transitNote && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
+                {!modes.length && !hybrids.length && !updatingCar && hybridState.settled && (
+                  <p role="status" className="rounded-xl bg-[var(--chip)] p-3 text-sm text-[var(--muted)]">
+                    Pažymėtomis transporto priemonėmis šiai kelionei tinkamų būdų neradome. Pažymėkite daugiau po A ir B laukeliais arba pabandykite kitą išvykimo laiką.
+                  </p>
+                )}
+                {driving.error && <p role="status" className="text-sm text-[var(--stop)]">{driving.error}</p>}
+                {!plan.transit && plan.transitNote && travelOn(tripSettings, "transit") && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
 
-                {sel && (
+                {current && (
                   <>
                     <div className="border-t border-[var(--line)]" />
-                    <ImpactTiles modes={modes} sel={sel} />
-                    {sel.feasible && <RouteSteps plan={plan} mode={sel} toLabel={to?.label ?? "B"} />}
-                    <ModeExtras
+                    <TripDetails
                       plan={plan}
-                      mode={sel}
+                      option={current}
+                      car={car}
+                      toLabel={to?.label ?? "B"}
                       parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
+                      hybridNote={hybridState.note}
                     />
-                    {sel.feasible && <NavButton plan={plan} mode={sel.id} className="lg:hidden" />}
+                    <NavButton nav={nav} className="lg:hidden" />
                   </>
                 )}
 
                 {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={tripSettings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-                  Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.
-                  Automobilis: {plan.car?.traffic.provider === "tomtom" ? "TomTom eismo maršrutas" : "apytikslis OSRM / Via Lietuva vertinimas"}. Dviratis ir pėsčiomis: OSRM / OpenStreetMap. Orai: meteo.lt.
-                  {plan.bikeshareNote && ` ${plan.bikeshareNote}`}
+                  {plan.timetable.shifted && "Pasirinkta data už tvarkaraščių ribų – naudojama ta pati savaitės diena. "}
+                  {plan.bikeshareNote && `${plan.bikeshareNote} `}
+                  Duomenys: <span title={`Tvarkaraščiai: ${plan.timetable.window}`}>LTSA GTFS</span>, {plan.car?.traffic.provider === "tomtom" ? "TomTom" : "OSRM / Via Lietuva"}, OpenStreetMap, meteo.lt.
                 </p>
               </>
             )}
@@ -663,9 +708,9 @@ export default function Planner() {
             <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
           </div>
         </BottomSheet>
-        {plan && sel?.feasible && (
+        {plan && nav && (
           <div className="sticky bottom-0 z-20 mt-auto hidden bg-gradient-to-t from-[var(--panel)] from-60% to-transparent px-6 pt-6 pb-5 lg:block">
-            <NavButton plan={plan} mode={sel.id} />
+            <NavButton nav={nav} />
           </div>
         )}
       </aside>

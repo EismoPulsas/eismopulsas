@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Grid, haversine, inPolygon, simplify, type LatLng } from "../geo";
 import type { departure } from "../departure";
-import { evalParkingAt, MINUTE_EUR, SWITCH_PENALTY_SEC, CHARGE_BONUS_SEC, type Settings } from "../metrics";
+import { evalParkingAt, hubStayHours, MINUTE_EUR, OWN_SCOOTER_HANDLING, SCOOTER_SPEED, SWITCH_PENALTY_SEC, CHARGE_BONUS_SEC, type Settings } from "../metrics";
 import type { HybridOption, HybridResponse, HybridSecond, LiveLot, ParkingOption, ScooterResult, SecondKind } from "../plan-types";
 import { bikeStations, type BikeStation } from "./bikeshare";
 import { estimateScooter, planBikeshare, straightRoute } from "./micromobility";
@@ -14,17 +14,23 @@ import { planTransit, resolveDay, stopNear } from "./transit";
 
 // Car + second leg: drive part of the way, leave the car where it is cheap (P+R, a car
 // park, free street parking) or where it can charge, and continue by public transport,
-// Cyclocity or scooter. The hub must sit next to the next vehicle: a stop, a Cyclocity
-// station or a scooter spot (JUDU) or scooter.
+// Cyclocity or scooter. The car is left right next to the next vehicle: a stop, a Cyclocity
+// station, a free scooter (or, without a fleet feed, a JUDU scooter spot). With the user's
+// own scooter any cheap place on the way will do: the scooter comes out of the boot.
 //
 // Cost of one request: 1 OSRM table call for the drive to every candidate hub, ≤ 4 OSRM
-// bike routes, ≤ 5 OSRM car routes for the map. No TomTom calls: the hub drive is OSRM
-// scaled by the TomTom A → B time the planner already has (`carSec`).
+// bike routes, ≤ 8 OSRM car routes (they also check the drive really ends at the parking).
+// No TomTom calls: the hub drive is OSRM scaled by the TomTom A → B time (`carSec`).
 
 type Departure = ReturnType<typeof departure>;
 
 const MIN_STRAIGHT = 1500; // shorter trips: just drive or walk
-const ACCESS = { transit: 400, bikeshare: 250, scooter: 200 } satisfies Record<SecondKind, number>;
+/** Straight-line metres from the parked car to the next vehicle, at most. */
+const ACCESS = { transit: 300, bikeshare: 200, scooter: 150 } satisfies Record<SecondKind, number>;
+/** The same along the streets (what the second leg actually walks). */
+const ACCESS_WALK = { transit: 450, bikeshare: 300, scooter: 230 } satisfies Record<SecondKind, number>;
+/** The router's end of the drive may lie this far from the parking (entrance, car park aisles). */
+const MAX_SNAP = 75;
 const WALK = 1.25; // m/s
 const DETOUR = 1.3;
 /** Candidates kept per kind after the rough estimate, then after the real drive times. */
@@ -75,17 +81,18 @@ const stationNear = (stations: BikeStation[], p: LatLng, isNow: boolean) =>
     .sort((a, b) => a.d - b.d)[0] ?? null;
 
 /** Rough seconds from leaving the hub to B, before routing it. */
-function secondGuess(kind: SecondKind, access: number, hubToB: number): number {
+function secondGuess(kind: SecondKind, access: number, hubToB: number, own: boolean): number {
   const d = hubToB * DETOUR;
   if (kind === "transit") return (access * DETOUR) / WALK + 300 + d / (20 / 3.6);
   if (kind === "bikeshare") return (access * DETOUR) / WALK + 120 + d / (16 / 3.6) + 180;
-  return (access * DETOUR) / WALK + 90 + d / (17 / 3.6);
+  if (own) return OWN_SCOOTER_HANDLING + d / SCOOTER_SPEED;
+  return (access * DETOUR) / WALK + 90 + d / SCOOTER_SPEED;
 }
 
 /** Money of the second leg there and back, roughly (P+R includes Vilnius public transport). */
 function secondPriceGuess(kind: SecondKind, hub: ParkingOption, rideSec: number, s: Settings): number {
   if (kind === "transit") return hub.lot?.t.flat ? 0 : 2;
-  if (kind === "bikeshare") return 0;
+  if (kind === "bikeshare" || s.ownScooter) return 0;
   return 2 * (s.scooterUnlock + Math.ceil(rideSec / 60) * s.scooterPerMin);
 }
 
@@ -100,18 +107,20 @@ export async function planHybrids(q: {
   depart: Departure;
   /** Driving A → B, seconds, with traffic (the planner's car leg); null = unknown. */
   carSec: number | null;
+  /** How the user accepts to continue from the car. */
+  kinds: SecondKind[];
   settings: Settings;
   live: Record<string, LiveLot> | null;
 }): Promise<HybridResponse> {
-  const { from, to, depart, settings: s } = q;
+  const { from, to, depart, kinds: modes, settings: s } = q;
   const straight = haversine(from, to);
-  const modes = s.hybridModes;
   if (straight < MIN_STRAIGHT || !modes.length) return { options: [], trafficFactor: null, note: null };
   const ev = s.fuel === "electric" || (s.fuel === "hybrid" && s.plugIn);
+  const own = s.ownScooter;
 
   const [stations, fleet] = await Promise.all([
     modes.includes("bikeshare") ? bikeStations().catch(() => [] as BikeStation[]) : ([] as BikeStation[]),
-    modes.includes("scooter") ? scooterFleet() : Promise.resolve<Fleet>({ source: "none", operator: null, updated: null, vehicles: [] }),
+    modes.includes("scooter") && !own ? scooterFleet() : Promise.resolve<Fleet>({ source: "none", operator: null, updated: null, vehicles: [] }),
   ]);
 
   // 1. Places to leave the car, each paired with the next vehicle right next to it.
@@ -125,8 +134,6 @@ export async function planHybrids(q: {
   });
   const rough: Candidate[] = [];
   for (const hub of hubs) {
-    const park = evalParkingAt(hub, depart.date, roughArrive, s);
-    if (!park.usable || park.cost == null || park.chance === "low") continue;
     const hubToB = haversine(hub.pos, to);
     const carGuess = (q.carSec ?? straight / 8) * Math.min(1, haversine(from, hub.pos) / straight) + 60;
     const access: Partial<Record<SecondKind, number>> = {};
@@ -139,13 +146,21 @@ export async function planHybrids(q: {
       if (st) access.bikeshare = st.d;
     }
     if (modes.includes("scooter")) {
-      const v = fleet.source !== "none" ? nearestScooter(fleet, hub.pos, 250) : null;
-      const spot = spotNear(hub.pos, ACCESS.scooter);
-      const d = Math.min(v?.distance ?? Infinity, spot?.distance ?? Infinity);
-      if (Number.isFinite(d)) access.scooter = d;
+      if (own) access.scooter = 0;
+      else if (fleet.source !== "none") {
+        // A spot is no scooter: with a fleet feed there must be a free one right there.
+        const v = nearestScooter(fleet, hub.pos, ACCESS.scooter);
+        if (v) access.scooter = v.distance;
+      } else {
+        // No feed: shared scooters gather at the JUDU spots, so the car is left next to one.
+        const spot = spotNear(hub.pos, ACCESS.scooter);
+        if (spot) access.scooter = spot.distance;
+      }
     }
     for (const kind of Object.keys(access) as SecondKind[]) {
-      const second = secondGuess(kind, access[kind]!, hubToB);
+      const second = secondGuess(kind, access[kind]!, hubToB, own);
+      const park = evalParkingAt(hub, depart.date, roughArrive, s, s.parkingHours + (2 * second) / 3600);
+      if (!park.usable || park.cost == null || park.chance === "low") continue;
       const euros = park.cost + secondPriceGuess(kind, hub, second, s);
       rough.push({ hub, kind, access: access[kind]!, carSec: carGuess, carDist: null, score: generalized(carGuess + second, euros, park.charge?.kWh ?? 0, s) });
     }
@@ -183,25 +198,38 @@ export async function planHybrids(q: {
   const built = await Promise.all(exact.map((c) => buildOption(c, q, s, fleet, day)));
   const ranked = built.filter((x): x is { option: HybridOption; score: number } => !!x).sort((a, b) => a.score - b.score);
 
-  // 4. A varied short list: at most two per kind, never the same place twice.
+  // 4. The drive on the map. It must end at the parking itself, arriving from the parking
+  // side where that matters: a place the router cannot reach (it stops on another road) is dropped.
+  const reached = await Promise.all(ranked.map(async (x) => ((await routeToHub(from, x.option)) ? x : null)));
+
+  // 5. A varied short list: at most two per kind, never the same place twice.
   const picked: HybridOption[] = [];
-  for (const { option } of ranked) {
+  for (const x of reached) {
+    if (!x) continue;
+    const { option } = x;
     if (picked.length >= MAX_OPTIONS) break;
     if (picked.filter((p) => p.second.kind === option.second.kind).length >= PER_KIND) continue;
     if (picked.some((p) => p.second.kind === option.second.kind && haversine(p.hub.pos, option.hub.pos) < 300)) continue;
     picked.push(option);
   }
-
-  // 5. The drive on the map, arriving from the parking side where that matters.
-  await Promise.all(
-    picked.map(async (o) => {
-      const r = await osrmRoute("car", from, o.car.to, false, !!o.hub.curb);
-      if (!r) return;
-      o.car.geometry = simplify(r.coords, 8);
-      o.car.distance = Math.round(r.distance);
-    }),
-  );
   return { options: picked, trafficFactor: factor, note: table ? null : `Važiavimo iki persėdimo vietos laikas apytikslis (maršrutų paslauga neatsakė).` };
+}
+
+/**
+ * Routes the drive to the hub and makes it end exactly there (a short last piece from the
+ * road into the car park). false: the router's nearest road is too far from the parking.
+ * Without the router the straight-line estimate stays (drawn dashed).
+ */
+async function routeToHub(from: LatLng, o: HybridOption): Promise<boolean> {
+  const target = o.car.to;
+  const r = await osrmRoute("car", from, target, false, !!o.hub.curb);
+  if (!r?.coords.length) return true;
+  const end = r.coords[r.coords.length - 1];
+  const gap = haversine(end, target);
+  if (gap > MAX_SNAP) return false;
+  o.car.geometry = simplify(gap > 3 ? [...r.coords, target] : r.coords, 8);
+  o.car.distance = Math.round(r.distance + gap);
+  return true;
 }
 
 async function buildOption(
@@ -214,9 +242,10 @@ async function buildOption(
   const { from, to, depart } = q;
   const carSec = Math.round(c.carSec);
   const parkedAt = depart.sec + 120 + carSec;
-  const park = evalParkingAt(c.hub, depart.date, parkedAt, s);
-  if (park.cost == null) return null;
-  const leave = parkedAt + park.searchSec;
+  // Finding the space: the second leg starts after it (as in the car option).
+  const searchSec = evalParkingAt(c.hub, depart.date, parkedAt, s).searchSec;
+  const leave = parkedAt + searchSec;
+  const hubPos = c.hub.navigationPos ?? c.hub.pos;
   let second: HybridSecond;
   let arrive: number;
   let walk: number;
@@ -227,24 +256,41 @@ async function buildOption(
     if (!t || !t.legs.some((l) => l.kind === "ride")) return null;
     const first = t.legs[0];
     walk = first.kind === "walk" ? first.distance : 0;
-    if (walk > 700) return null; // the stop is not really at the car park
+    if (walk > ACCESS_WALK.transit) return null; // the stop is not really at the car park
     second = { kind: "transit", transit: t };
     arrive = t.arrive;
     const rides = t.legs.filter((l) => l.kind === "ride").length;
     if (rides > 1) extra += (rides - 1) * SWITCH_PENALTY_SEC;
   } else if (c.kind === "bikeshare") {
     const { result } = await planBikeshare(c.hub.pos, to, depart.date, depart.isNow, true, false);
-    if (!result || result.walkTo > 350 * DETOUR) return null;
+    if (!result || result.walkTo > ACCESS_WALK.bikeshare) return null;
     walk = result.walkTo;
     second = { kind: "bikeshare", bikeshare: { ...result, geometry: simplify(result.geometry, 8) } };
     arrive = leave + result.duration;
+  } else if (s.ownScooter) {
+    // Own scooter out of the boot: ride from the car straight to B.
+    const ride = (await osrmRoute("bike", hubPos, to)) ?? straightRoute(hubPos, to, SCOOTER_SPEED);
+    const rideDuration = Math.round(ride.distance / SCOOTER_SPEED);
+    const sc: ScooterResult = {
+      city: null,
+      source: "own",
+      operator: null,
+      vehicle: null,
+      distance: Math.round(ride.distance),
+      rideDuration,
+      duration: rideDuration + OWN_SCOOTER_HANDLING,
+      geometry: simplify(ride.coords, 8),
+    };
+    walk = 0;
+    second = { kind: "scooter", scooter: sc };
+    arrive = leave + sc.duration;
   } else {
     // Old Town: the ride ends at the nearest marked spot, then a short walk.
     const end = inOldTown(to) ? spotNear(to, 400) : null;
     const target = end?.pos ?? to;
-    const ride = (await osrmRoute("bike", c.hub.pos, target)) ?? straightRoute(c.hub.pos, target, 16 / 3.6);
-    const sc: ScooterResult | null = await estimateScooter(c.hub.pos, target, ride, fleet);
-    if (!sc) return null;
+    const ride = (await osrmRoute("bike", c.hub.pos, target)) ?? straightRoute(c.hub.pos, target, SCOOTER_SPEED);
+    const sc: ScooterResult | null = await estimateScooter(c.hub.pos, target, ride, fleet, ACCESS.scooter);
+    if (!sc || (sc.vehicle && sc.vehicle.walk > ACCESS_WALK.scooter)) return null;
     const endWalk = end ? Math.round(end.distance * DETOUR) : 0;
     walk = sc.vehicle?.walk ?? Math.round(c.access * DETOUR);
     second = {
@@ -254,21 +300,25 @@ async function buildOption(
     arrive = leave + sc.duration + Math.round(endWalk / WALK);
   }
 
+  // The car stands there for the stay at B and the second leg both ways.
+  const park = evalParkingAt(c.hub, depart.date, parkedAt, s, hubStayHours({ arrive, parkedAt, searchSec }, s));
+  if (!park.usable || park.cost == null) return null;
+
   // Unnamed car parks and street pieces are easier to find by what is next to them.
   const landmark =
     second.kind === "transit" ? second.transit.legs.find((l) => l.kind === "ride")?.from.name
     : second.kind === "bikeshare" ? second.bikeshare.from.name
+    : s.ownScooter ? (stopNear(c.hub.pos, 400)?.name ?? null)
     : (spotNear(c.hub.pos, ACCESS.scooter)?.addr ?? stopNear(c.hub.pos, 400)?.name ?? null);
   const generic = /^(Aikštelė|Gatvė)( \(|$)/.test(c.hub.name);
   const name = generic && landmark ? `${c.hub.kind === "lot" ? "Aikštelė" : "Gatvėje"} prie „${landmark}“` : c.hub.name;
   const hub: ParkingOption = { ...c.hub, name, walk: Math.round(walk) };
-  const hubPos = hub.navigationPos ?? hub.pos;
   const option: HybridOption = {
-    id: `${c.kind}:${hub.id}`,
+    id: `${c.kind}${s.ownScooter && c.kind === "scooter" ? "-own" : ""}:${hub.id}`,
     hub,
     car: { from, to: hubPos, duration: carSec, distance: Math.round(c.carDist ?? haversine(from, hubPos) * DETOUR), geometry: [from, hubPos], estimated: true },
     parkedAt,
-    searchSec: park.searchSec,
+    searchSec,
     second,
     arrive,
     duration: arrive - depart.sec,
