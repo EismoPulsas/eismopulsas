@@ -559,3 +559,16 @@ export function departuresFrom(stop: number, date: string, sec: number, limit = 
   out.sort((a, b) => a.time - b.time);
   return { name: N.raw.stops.name[stop], departures: out.slice(0, limit) };
 }
+
+/** The nearest stop with departures within `radius` metres of p. */
+export function stopNear(p: LatLng, radius: number): { name: string; pos: LatLng; distance: number } | null {
+  const N = load();
+  let best: { name: string; pos: LatLng; distance: number } | null = null;
+  for (const s of N.grid.near(p, radius)) {
+    if (!N.stopPatterns[s].length) continue;
+    const pos = stopPos(N, s);
+    const distance = haversine(p, pos);
+    if (distance <= radius && (!best || distance < best.distance)) best = { name: N.raw.stops.name[s], pos, distance };
+  }
+  return best;
+}

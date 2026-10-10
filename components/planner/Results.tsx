@@ -1,23 +1,26 @@
 "use client";
 
-import { fmtStay, parkingEvals, type ModeId, type ModeSummary, type ParkingEval, type Settings } from "@/lib/metrics";
-import type { PlanResponse, TransitResult } from "@/lib/plan-types";
-import { fmtClock, fmtEur, fmtKm, fmtNum } from "./format";
+import { fmtStay, parkingEvals, type ModeSummary, type ParkingEval, type Settings } from "@/lib/metrics";
+import type { PlanResponse, RideLeg, TransitResult } from "@/lib/plan-types";
+import { fmtClock, fmtDur, fmtEur, fmtKm, fmtNum, ROUTE_TYPE } from "./format";
+import { BusIcon, FerryIcon, TrolleyIcon, WalkIcon } from "./icons";
 import { LOT_CLASS, lotClass, ZONE_COLOR } from "./parking-meta";
 import { CarDriveDetails } from "./CarDriveDetails";
 
 /** Parking choice for the car option, owned by the planner. */
 export type ParkingChoiceProps = { settings: Settings; parkingId: string | null; onParking: (id: string) => void; updating?: boolean; error?: string | null };
 
-type Signal = "go" | "wait" | "stop";
+export type Signal = "go" | "wait" | "stop";
+/** Traffic-light colour per option id for time, price and CO₂. */
+export type Signals = Record<"duration" | "cost" | "co2", Map<string, Signal>>;
 
-/** Green for the best value, red for the worst, amber in between. */
-export function signals(modes: ModeSummary[], key: "duration" | "cost" | "co2"): Map<ModeId, Signal> {
+/** Green for the best value, red for the worst, amber in between (single modes and car combinations alike). */
+export function signals(modes: { id: string; feasible: boolean; duration: number; cost: number; co2: number }[], key: "duration" | "cost" | "co2"): Map<string, Signal> {
   const ok = modes.filter((m) => m.feasible);
   const vals = ok.map((m) => m[key]);
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
-  const out = new Map<ModeId, Signal>();
+  const out = new Map<string, Signal>();
   for (const m of ok) {
     const v = m[key];
     out.set(m.id, hi - lo < 1e-6 || v - lo <= (hi - lo) * 0.15 ? "go" : v >= hi - (hi - lo) * 0.15 ? "stop" : "wait");
@@ -25,11 +28,22 @@ export function signals(modes: ModeSummary[], key: "duration" | "cost" | "co2"):
   return out;
 }
 
-function Row({ label, value, muted }: { label: React.ReactNode; value: React.ReactNode; muted?: boolean }) {
+export function Row({ label, value, muted }: { label: React.ReactNode; value: React.ReactNode; muted?: boolean }) {
   return (
     <div className={`flex items-baseline justify-between gap-3 text-sm ${muted ? "text-[var(--muted)]" : ""}`}>
       <span className="min-w-0">{label}</span>
       <span className="tnum shrink-0 font-medium">{value}</span>
+    </div>
+  );
+}
+
+export function Metric({ icon, value, signal, label }: { icon: React.ReactNode; value: string; signal?: Signal; label: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5" title={label}>
+      {signal ? <span className={`signal ${signal}`} aria-hidden /> : <span className="w-2" />}
+      <span className="hidden text-[var(--muted)] sm:inline">{icon}</span>
+      <span className="tnum truncate text-sm font-semibold">{value}</span>
+      <span className="sr-only">{label}</span>
     </div>
   );
 }
@@ -210,6 +224,92 @@ export function TransitSummary({ t }: { t: TransitResult }) {
         <span>
           Išeiti {fmtClock(t.leave)} · atvyksite {fmtClock(t.arrive)}
         </span>
+        <span>{t.transfers ? `${t.transfers} persėdimas(-ai)` : "Be persėdimų"}</span>
+        <span>Pėsčiomis {fmtKm(t.walkDistance)}</span>
+        {t.next && <span>Kitas reisas – išeiti {fmtClock(t.next)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function RideIcon({ leg }: { leg: RideLeg }) {
+  if (leg.route.type === 11) return <TrolleyIcon size={16} />;
+  if (leg.route.type === 4) return <FerryIcon size={16} />;
+  return <BusIcon size={16} />;
+}
+
+export function TransitTimeline({ t }: { t: TransitResult }) {
+  return (
+    <div className="flex flex-col">
+      {t.laneMeters > 150 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="lane-badge">
+            <b>A</b> {fmtKm(t.laneMeters)} gatvėmis su A juosta
+          </span>
+          <span className="text-xs text-[var(--muted)]">{Math.round((t.laneMeters / Math.max(1, t.rideDistance)) * 100)} % kelionės aplenkiant spūstis</span>
+        </div>
+      )}
+      <ol className="relative flex flex-col">
+        {t.legs.map((l, i) => (
+          <li key={i} className="relative flex gap-3 pb-3 last:pb-0">
+            <div className="flex w-12 shrink-0 flex-col items-end pt-0.5">
+              <span className="tnum text-xs font-semibold">{fmtClock(l.kind === "ride" ? l.dep : l.start)}</span>
+            </div>
+            <div className="relative flex w-4 shrink-0 justify-center">
+              {l.kind === "ride" ? (
+                <span className="absolute top-1 bottom-[-4px] w-1.5 rounded-full" style={{ background: l.route.color || "var(--transit)" }} />
+              ) : (
+                <span className="lane-vertical absolute top-1 bottom-[-4px]" />
+              )}
+              <span className="relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white bg-[var(--panel)]" />
+            </div>
+            <div className="min-w-0 flex-1 pb-1">
+              {l.kind === "walk" ? (
+                <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+                  <WalkIcon size={15} />
+                  Eiti {fmtKm(l.distance)} · {fmtDur(l.end - l.start)}
+                  {l.toName && <span className="truncate">iki „{l.toName}“</span>}
+                  {l.tight && <span className="shrink-0 font-medium text-[var(--wait)]">· persėsti spėsite tik paskubėję</span>}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-bold text-white"
+                      style={{ background: l.route.color || "var(--transit)" }}
+                    >
+                      <RideIcon leg={l} />
+                      {l.route.short || ROUTE_TYPE[l.route.type]}
+                    </span>
+                    <span className="truncate text-sm">→ {l.headsign || l.route.long}</span>
+                  </div>
+                  <div className="text-sm">
+                    <b>{l.from.name}</b> <span className="text-[var(--muted)]">→</span> <b>{l.to.name}</b>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-[var(--muted)]">
+                    <span>
+                      {l.stops} st. · {fmtDur(l.arr - l.dep)} · {fmtKm(l.distance)}
+                    </span>
+                    <span>išlipti {fmtClock(l.arr)}</span>
+                    {l.laneMeters > 100 && <span className="text-[var(--lane)]">A juosta {fmtKm(l.laneMeters)}</span>}
+                  </div>
+                  <div className="text-[11px] text-[var(--muted)]/80">{l.route.agency}</div>
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+        <li className="flex gap-3">
+          <div className="flex w-12 shrink-0 justify-end">
+            <span className="tnum text-xs font-semibold">{fmtClock(t.arrive)}</span>
+          </div>
+          <div className="flex w-4 justify-center">
+            <span className="h-3 w-3 rounded-full bg-[#b4232f] ring-2 ring-white" />
+          </div>
+          <span className="text-sm font-semibold">Atvykimas</span>
+        </li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
         <span>{t.transfers ? `${t.transfers} persėdimas(-ai)` : "Be persėdimų"}</span>
         <span>Pėsčiomis {fmtKm(t.walkDistance)}</span>
         {t.next && <span>Kitas reisas – išeiti {fmtClock(t.next)}</span>}

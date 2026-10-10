@@ -2,7 +2,7 @@
 // Builds the data files the route planner reads.
 //
 //   npm run data            # everything
-//   npm run data -- transit # only one part: transit | lanes | parking | chargers | border
+//   npm run data -- transit # only one part: transit | lanes | parking | street | scooters | chargers | border
 //
 // Sources (all open, no keys needed):
 //   - LTSA nacionalinis prieigos taškas, visų Lietuvos viešojo transporto GTFS (visimarsrutai.lt)
@@ -15,7 +15,7 @@
 // Outputs:
 //   data/transit.json.gz      – compact timetable for the server-side router
 //   public/data/bus-lanes.json
-//   public/data/{parking,lots,street-parking,lot-occupancy,chargers}.json (build-parking.mjs)
+//   public/data/{parking,lots,street-parking,lot-occupancy,chargers,scooter-spots}.json (build-parking.mjs)
 //   public/data/lithuania.json
 //
 // Raw downloads are cached in .cache/ for a day, so re-runs are fast.
@@ -24,7 +24,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
-import { buildChargers, buildParking } from "./build-parking.mjs";
+import { buildChargers, buildParking, buildScooterSpots, buildStreet } from "./build-parking.mjs";
 
 // fileURLToPath, not URL.pathname: the latter gives "/C:/…" on Windows.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -487,6 +487,9 @@ const want = (part) => !only.length || only.includes(part);
 const helpers = { ROOT, CACHE, UA, getJson, cachedDownload, simplify, round5 };
 if (want("lanes")) await buildLanes();
 if (want("parking")) await buildParking(helpers);
+// `parking` already writes street-parking.json; `street` alone redoes just that file.
+if (only.includes("street") && !only.includes("parking")) await buildStreet(helpers);
+if (want("scooters")) await buildScooterSpots(helpers);
 if (want("chargers")) await buildChargers(helpers);
 if (want("border")) await buildBorder();
 if (want("transit")) await buildTransit();

@@ -138,6 +138,8 @@ export type ParkingOption = {
   pos: LatLng;
   /** Verified vehicle entrance, when the source supplies one. */
   navigationPos?: LatLng;
+  /** Street parking on one side: route so the driver arrives with it on the right (kerb) side. */
+  curb?: boolean;
   /** Walking distance to B, metres (straight line × 1.3). */
   walk: number;
   lot?: Omit<Lot, "poly">;
@@ -245,6 +247,8 @@ export type ScooterResult = {
   rideDuration: number;
   duration: number;
   geometry: LatLng[];
+  /** Where the ride ends when B is in a zone with designated scooter spots (Vilnius Old Town). */
+  endSpot?: { pos: LatLng; addr: string | null; walk: number } | null;
 };
 
 export type WalkLeg = {
@@ -329,4 +333,40 @@ export type PlanResponse = {
   transitNote: string | null;
   timetable: { built: string; window: string; shifted: boolean };
   weather: TripWeather | null;
+};
+
+/** What carries the traveller on from where the car is left. */
+export type SecondKind = "transit" | "bikeshare" | "scooter";
+
+export type HybridSecond =
+  | { kind: "transit"; transit: TransitResult }
+  | { kind: "bikeshare"; bikeshare: BikeshareResult }
+  | { kind: "scooter"; scooter: ScooterResult };
+
+/**
+ * Drive part of the way, leave the car (P+R, a cheap car park or street, a charger) and
+ * continue by public transport, Cyclocity or scooter. Times are seconds after local midnight
+ * of the departure day; the car leg is an OSRM estimate scaled to the TomTom A → B time.
+ */
+export type HybridOption = {
+  id: string;
+  /** Where the car stays; `walk` = metres from it to where the second leg starts. */
+  hub: ParkingOption;
+  car: { from: LatLng; to: LatLng; duration: number; distance: number; geometry: LatLng[]; estimated: true };
+  /** The car is parked (arrival at the hub). */
+  parkedAt: number;
+  /** Finding a space / getting in, seconds (as in the car option). */
+  searchSec: number;
+  second: HybridSecond;
+  /** Arrival at B. */
+  arrive: number;
+  /** Door to door, including the 2 minutes to get to the car. */
+  duration: number;
+};
+
+export type HybridResponse = {
+  options: HybridOption[];
+  /** TomTom (or traffic-adjusted) A → B time divided by OSRM free-flow, applied to hub legs. */
+  trafficFactor: number | null;
+  note: string | null;
 };

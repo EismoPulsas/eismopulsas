@@ -5,21 +5,38 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { preconnect } from "react-dom";
 import { inLithuania, type LatLng } from "@/lib/geo";
-import { bestParking, DEFAULT_SETTINGS, isEv, parkingEvals, rank, summarize, type ModeId } from "@/lib/metrics";
+import {
+  bestParking,
+  DEFAULT_SETTINGS,
+  isEv,
+  isHybridId,
+  parkingEvals,
+  rank,
+  summarize,
+  summarizeHybrids,
+  type HybridSummary,
+  type ModeId,
+  type ModeSummary,
+  type OptionId,
+} from "@/lib/metrics";
+import { estimateStay, type StayEstimate } from "@/lib/stay";
 import type { PlanResponse } from "@/lib/plan-types";
 import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
-import { MODE_META } from "./format";
+import { fmtClock, MODE_META } from "./format";
 import { ChevronIcon, GearIcon, SwapIcon } from "./icons";
 import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
 import { ParkingCard } from "./ParkingCard";
 import type { MapPick } from "./parking-meta";
 import { PlaceInput, placeLabel, type Place } from "./PlaceInput";
-import { ModeExtras } from "./Results";
+import { HybridCard, hybridTitle, MoreHybrids, StayLine } from "./HybridCard";
+import { usualTrip, useHabits } from "./habits";
+import { ModeExtras, signals, type Signals } from "./Results";
 import { Savings } from "./Savings";
 import { useSettings } from "./settings";
 import { useCarDrive } from "./useCarDrive";
+import { useHybrids } from "./useHybrids";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
 import { ImpactTiles, LiveStatus, ModeMatrix, NavButton, NowClock, RouteSteps } from "./Trip";
 import { WeatherCard } from "./Weather";
@@ -45,13 +62,13 @@ function localNow(): string {
   return s.replace(" ", "T").slice(0, 16);
 }
 
-async function reverse(p: LatLng): Promise<string> {
+async function reverse(p: LatLng): Promise<{ label: string; cat?: string }> {
   try {
     const r = await fetch(`/api/geocode?lat=${p[0]}&lng=${p[1]}`);
     const d = await r.json();
-    if (d.label) return placeLabel(d.label, d.sub);
+    if (d.label) return { label: placeLabel(d.label, d.sub), cat: d.cat };
   } catch {}
-  return `${p[0].toFixed(4)}, ${p[1].toFixed(4)}`;
+  return { label: `${p[0].toFixed(4)}, ${p[1].toFixed(4)}` };
 }
 
 const parseLL = (s: string | null): LatLng | null => {
@@ -74,7 +91,7 @@ export default function Planner() {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ModeId | null>(null);
+  const [selected, setSelected] = useState<OptionId | null>(null);
   const [alt, setAlt] = useState<Exclude<ModeId, "car">>("transit");
   const [layers, setLayers] = useState<Layers>({ lanes: true, traffic: false, parking: false, charging: true, bikeshare: false, scooters: false, stops: true });
   const [showSettings, setShowSettings] = useState(false);
@@ -87,12 +104,23 @@ export default function Planner() {
   const live = useLiveParking(layers.parking || (ev && layers.charging), ev && layers.charging);
   const queryKey = JSON.stringify([from?.pos, to?.pos, departAt, settings.maxWalkMin]);
   const currentPlan = loadedQuery === queryKey ? basePlan : null;
+  // How long the car stands at B: guessed from the place, the time and the user's habits;
+  // it replaces the profile's usual stay for this trip (parking prices, P+R, charging).
+  const { habits, rememberStay, logTrip } = useHabits();
+  const [stayPick, setStayPick] = useState<{ key: string; hours: number } | null>(null);
+  const arriveSec = currentPlan ? currentPlan.depart.sec + 120 + (currentPlan.car?.drive.duration ?? 0) : 0;
+  const stay = useMemo((): StayEstimate | null => {
+    if (!currentPlan || !to) return null;
+    if (stayPick?.key === queryKey) return { hours: stayPick.hours, reason: "jūsų pasirinkimas", source: "override" };
+    return estimateStay({ to: to.pos, cat: to.cat, weekday: currentPlan.depart.weekday, arriveSec, habits, profileHours: settings.parkingHours });
+  }, [currentPlan, to, stayPick, queryKey, arriveSec, habits, settings.parkingHours]);
+  const tripSettings = useMemo(() => (stay ? { ...settings, parkingHours: stay.hours } : settings), [settings, stay]);
   // Refreshed driving times must not silently change the chosen destination.
   const chosenParking = useMemo(() => {
     if (!currentPlan?.car) return undefined;
-    const options = parkingEvals(currentPlan, settings);
-    return (options.find((p) => p.option.id === parkingId) ?? bestParking(options, settings.priority))?.option;
-  }, [currentPlan, settings, parkingId]);
+    const options = parkingEvals(currentPlan, tripSettings);
+    return (options.find((p) => p.option.id === parkingId) ?? bestParking(options, tripSettings.priority))?.option;
+  }, [currentPlan, tripSettings, parkingId]);
   const driving = useCarDrive(currentPlan, chosenParking, refresh, settings.maxWalkMin, !loading);
   const plan = driving.plan;
   const updatingCar = loading || driving.pending;
@@ -119,7 +147,7 @@ export default function Planner() {
     const b = parseLL(q.get("to"));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (a) setFrom({ pos: a, label: q.get("a") ?? `${a[0]}, ${a[1]}` });
-    if (b) setTo({ pos: b, label: q.get("b") ?? `${b[0]}, ${b[1]}` });
+    if (b) setTo({ pos: b, label: q.get("b") ?? `${b[0]}, ${b[1]}`, cat: q.get("bc") ?? undefined });
     if (q.get("t")) setDepartAt(q.get("t"));
   }, []);
 
@@ -142,6 +170,7 @@ export default function Planner() {
     if (to) {
       q.set("to", to.pos.map((v) => v.toFixed(5)).join(","));
       q.set("b", to.label);
+      if (to.cat) q.set("bc", to.cat); // what B is: the stay guess survives sharing
     }
     if (departAt) q.set("t", departAt);
     const s = q.toString();
@@ -184,21 +213,34 @@ export default function Planner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, refresh]);
 
-  const modes = useMemo(() => (plan ? summarize(plan, settings, chosenParking?.id).map((m) =>
+  const modes = useMemo(() => (plan ? summarize(plan, tripSettings, chosenParking?.id).map((m) =>
     m.id === "car" && (updatingCar || driving.error) ? { ...m, feasible: false, why: driving.error ?? "Atnaujinamas važiavimo laikas…" } : m) : []),
-    [plan, settings, chosenParking?.id, updatingCar, driving.error]);
-  const ranking = useMemo(() => rank(modes, settings.priority), [modes, settings.priority]);
+    [plan, tripSettings, chosenParking?.id, updatingCar, driving.error]);
+  // Car + second leg: leave the car on the way (P+R, cheap parking, a charger) and continue.
+  const hybridState = useHybrids(currentPlan, tripSettings, !loading);
+  const hybrids = useMemo(() => (plan && hybridState.options.length ? summarizeHybrids(plan, hybridState.options, tripSettings) : []), [plan, hybridState.options, tripSettings]);
+  const ranking = useMemo(() => rank<ModeSummary | HybridSummary>([...modes, ...hybrids], settings.priority), [modes, hybrids, settings.priority]);
+  const sig = useMemo((): Signals => {
+    const all = [...modes, ...hybrids];
+    return { duration: signals(all, "duration"), cost: signals(all, "cost"), co2: signals(all, "co2") };
+  }, [modes, hybrids]);
+  // The best combination is shown first only when it beats driving all the way; the rest fold away.
+  const hybridOrder = useMemo(() => [...hybrids].sort((a, b) => (ranking.scores.get(a.id) ?? Infinity) - (ranking.scores.get(b.id) ?? Infinity)), [hybrids, ranking]);
+  const carScore = ranking.scores.get("car");
+  const topHybrid = hybridOrder[0] && ranking.scores.has(hybridOrder[0].id) && (carScore === undefined || ranking.scores.get(hybridOrder[0].id)! < carScore) ? hybridOrder[0] : null;
+  const moreHybrids = hybridOrder.filter((h) => h !== topHybrid);
+  const selectedHybrid = isHybridId(selected) ? hybrids.find((h) => h.id === selected) : undefined;
   const carPark = modes.find((m) => m.id === "car")?.parking?.option;
 
-  // Open the winner and compare the car against the best alternative.
+  // Open the winner (once combinations are in) and compare the car against the best alternative.
   useEffect(() => {
-    if (!plan) return;
+    if (!plan || !hybridState.settled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected((prev) => prev ?? ranking.best);
-    const alts = [...ranking.scores].filter(([id]) => id !== "car").sort((a, b) => a[1] - b[1]);
+    setSelected((prev) => (prev && !isHybridId(prev) ? prev : null) ?? ranking.best);
+    const alts = [...ranking.scores].filter(([id]) => id !== "car" && !isHybridId(id)).sort((a, b) => a[1] - b[1]);
     if (alts.length) setAlt(alts[0][0] as Exclude<ModeId, "car">);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basePlan]);
+  }, [basePlan, hybridState.settled]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -220,7 +262,7 @@ export default function Planner() {
     setNotice(null);
     const set = which === "from" ? setFrom : setTo;
     set({ pos: p, label: "…" });
-    set({ pos: p, label: await reverse(p) });
+    set({ pos: p, ...(await reverse(p)) });
   }, []);
 
   const onMapPick = useCallback(
@@ -254,16 +296,34 @@ export default function Planner() {
 
   // Picking a way turns on the map layer it needs (parking for the car, stations for Cyclocity…).
   const MODE_LAYER: Partial<Record<ModeId, keyof Layers>> = { car: "parking", bikeshare: "bikeshare", scooter: "scooters" };
-  const selectMode = (m: ModeId) => {
+  const selectMode = (m: OptionId) => {
     setSelected(m);
-    const need = MODE_LAYER[m];
+    const need = isHybridId(m) ? undefined : MODE_LAYER[m];
     if (need && !layers[need]) setLayers({ ...layers, [need]: true });
     if (snap === "peek") setSnap("half");
+    const opt = [...modes, ...hybrids].find((x) => x.id === m);
+    if (plan && from && to && opt && selected !== m)
+      logTrip({ from: from.pos, to: to.pos, toLabel: to.label, date: plan.depart.date, weekday: plan.depart.weekday, departSec: plan.depart.sec, arriveSec: plan.depart.sec + opt.duration });
   };
 
-  const best = ranking.best;
+  const pickStay = (hours: number) => {
+    setStayPick({ key: queryKey, hours });
+    if (to && currentPlan) rememberStay(to.pos, currentPlan.depart.weekday, arriveSec, hours);
+  };
+
+  // Waze-like: with A set and B empty, offer the trip usually made from here at this time.
+  const usual = useMemo(() => {
+    if (!from || to) return null;
+    const now = new Date();
+    return usualTrip(habits.trips, from.pos, now.getDay(), now.getHours() * 3600 + now.getMinutes() * 60);
+  }, [from, to, habits.trips]);
+
+  // The badge waits for combinations (≤ 2,5 s) so it does not jump from one card to another.
+  const best = hybridState.settled ? ranking.best : null;
+  const bestMode = isHybridId(best) ? null : best;
+  const bestHybrid = isHybridId(best) ? hybrids.find((h) => h.id === best) : undefined;
   const car = modes.find((m) => m.id === "car");
-  const sel = modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === best) ?? null;
+  const sel = isHybridId(selected) ? null : (modes.find((m) => m.id === selected) ?? modes.find((m) => m.id === bestMode) ?? null);
   const collapsed = !!plan && !editing;
 
   return (
@@ -273,7 +333,8 @@ export default function Planner() {
           from={from?.pos ?? null}
           to={to?.pos ?? null}
           plan={plan && (updatingCar || driving.error) ? { ...plan, car: null } : plan}
-          selected={sel?.id ?? null}
+          selected={selectedHybrid?.id ?? sel?.id ?? null}
+          hybrid={selectedHybrid?.hybrid ?? null}
           layers={layers}
           picking={!!picking || !from || !to}
           live={live}
@@ -452,6 +513,19 @@ export default function Planner() {
             )}
             {error && !loading && <div className="rounded-xl border border-[var(--stop)]/50 bg-[var(--stop)]/10 p-3 text-sm">{error}</div>}
 
+            {!plan && !loading && !error && usual && (
+              <button
+                type="button"
+                onClick={() => setTo({ pos: usual.to, label: usual.label })}
+                className="flex items-center gap-3 rounded-2xl border border-[var(--marking)]/60 bg-[var(--panel)] p-3 text-left"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[var(--marking)] font-display text-sm font-extrabold text-white">B</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">Į {usual.label}?</span>
+                  <span className="block text-xs text-[var(--muted)]">Paprastai išvykstate apie {fmtClock(usual.departSec)} · {usual.count} kartai</span>
+                </span>
+              </button>
+            )}
             {!plan && !loading && !error && (
               <Intro
                 onExample={(e) => {
@@ -467,7 +541,7 @@ export default function Planner() {
                   <span className="eyebrow">Multimodalinė matrica</span>
                   {best && (
                     <span className="rounded-full border border-[#a7f3d0] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--marking)]">
-                      Rekomenduojama: {MODE_META[best].short}
+                      Rekomenduojama: {bestHybrid ? hybridTitle(bestHybrid) : bestMode ? MODE_META[bestMode].short : ""}
                     </span>
                   )}
                 </div>
@@ -496,7 +570,29 @@ export default function Planner() {
                 </div>
 
                 {plan.weather && <WeatherCard w={plan.weather} />}
-                <ModeMatrix plan={plan} modes={modes} best={best} selected={sel?.id ?? null} onSelect={selectMode} />
+                <ModeMatrix plan={plan} modes={modes} best={bestMode} selected={sel?.id ?? null} onSelect={selectMode} />
+                {stay && plan.car && settings.hasCar && <StayLine stay={stay} onPick={pickStay} />}
+
+                {/* Car + second leg (P+R, VT, Cyclocity, scooter): the best one open, the rest folded. */}
+                {topHybrid ? (
+                  <HybridCard plan={plan} h={topHybrid} car={car} isBest={topHybrid.id === best} open={selected === topHybrid.id} sig={sig} onSelect={() => selectMode(topHybrid.id)} />
+                ) : !hybridState.settled && settings.hasCar ? (
+                  <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--line)] px-3 py-2.5 text-sm text-[var(--muted)]" role="status">
+                    <span className="traffic-light scale-75" aria-hidden>
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    Ieškome derinių su automobiliu…
+                  </div>
+                ) : null}
+                <MoreHybrids
+                  items={moreHybrids}
+                  selected={selected}
+                  onSelect={selectMode}
+                  render={(h) => <HybridCard plan={plan} h={h} car={car} isBest={h.id === best} open sig={sig} onSelect={() => selectMode(h.id)} />}
+                />
+                {hybridState.note && hybrids.length > 0 && <p className="text-[11px] text-[var(--muted)]">{hybridState.note}</p>}
                 {!plan.transit && plan.transitNote && <p className="-mt-1 text-xs text-[var(--muted)]">Viešasis transportas: {plan.transitNote}</p>}
 
                 {sel && (
@@ -507,13 +603,13 @@ export default function Planner() {
                     <ModeExtras
                       plan={plan}
                       mode={sel}
-                      parking={{ settings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
+                      parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
                     />
                     {sel.feasible && <NavButton plan={plan} mode={sel.id} className="lg:hidden" />}
                   </>
                 )}
 
-                {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={settings} carDistance={plan.car.distance} />}
+                {car?.feasible && plan.car && <Savings modes={modes} alt={alt} onAlt={setAlt} settings={tripSettings} carDistance={plan.car.distance} />}
 
                 <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                   Tvarkaraščiai: LTSA nacionalinis GTFS ({plan.timetable.window}){plan.timetable.shifted && " – pasirinkta data už ribų, naudojama ta pati savaitės diena"}.

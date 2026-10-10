@@ -9,6 +9,7 @@
 | Adresų paieška | Photon (komoot, OpenStreetMap): `https://photon.komoot.io/api/`; atsarginis – Nominatim: `https://nominatim.openstreetmap.org` |
 | VT stotelių paieška | iš LTSA GTFS (`data/transit.json.gz`) |
 | Paspirtukai | bet koks operatoriaus GBFS srautas per `SCOOTER_GBFS_URL`; kol jo nėra – DEMO duomenys tik dev / preview aplinkose |
+| Paspirtukų stovėjimo vietos, Senamiesčio paspirtukų zona | JUDU: `https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/Stov%C4%97jimo_vietos_per%C5%BEi%C5%ABra/FeatureServer/0`, `…/Senamiestis_paspirtukai/FeatureServer/0` |
 | Žemėlapio pagrindas | OpenFreeMap: `https://tiles.openfreemap.org/styles/` |
 | Viešojo transporto tvarkaraščiai | LTSA nacionalinis prieigos taškas (GTFS): `https://www.visimarsrutai.lt/gtfs/google_transit.zip` |
 | Šiaulių miesto maršrutai | stops.lt GTFS: `https://www.stops.lt/siauliai/siauliai/gtfs.zip` |

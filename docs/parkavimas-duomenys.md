@@ -22,7 +22,8 @@ Atsisiuntimai talpinami `.cache/` 20 val. UNIPARK puslapiai skaitomi ne dažniau
 | `parking.json` | Vilniaus (nuo 2025-07-01) ir Klaipėdos rinkliavos zonos; Vilniaus gyventojų leidimų zonos (vietų gatvėse skaičius, įprastas užimtumas) | ~60 KB |
 | `lots.json` | Visos Vilniaus aikštelės su ribomis ir visos ne-OSM aikštelės Lietuvoje (JUDU, UNIPARK, prekybos centrai) | ~0,9 MB |
 | `lots-lt.json` | Kitų Lietuvos vietų OpenStreetMap aikštelės (taškai); žemėlapis įkelia tik priartinus ne Vilniuje | ~1,9 MB |
-| `street-parking.json` | Stovėjimas gatvėse (linijos prie šaligatvio), stovėjimo vietos prie gatvės, vietos ant šaligatvio, draudžiamo stovėjimo atkarpos ir zonos | ~0,3 MB |
+| `street-parking.json` | Stovėjimas gatvėse (linijos prie šaligatvio; OSM atkarpos su `side`, `oneway`, `lanes` – iš kurios pusės privažiuoti), stovėjimo vietos prie gatvės, vietos ant šaligatvio, draudžiamo stovėjimo atkarpos ir zonos | ~0,3 MB |
+| `scooter-spots.json` | JUDU paspirtukų stovėjimo vietos ir Senamiesčio paspirtukų zona (`npm run data -- scooters`) | ~0,05 MB |
 | `lot-occupancy.json` | JUDU užtvarinės aikštelės: įprastas laisvų vietų skaičius ir tikimybė rasti vietą pagal savaitės dieną × valandą | ~50 KB |
 | `chargers.json` | Visos Lietuvos viešos įkrovimo vietos: jungtys, galia, kainos, kurioje aikštelėje | ~0,5 MB |
 | `data/curated-parking.json` | Rankiniu būdu surinktos prekybos centrų taisyklės su šaltiniais (redaguojama ranka) | – |
@@ -49,7 +50,8 @@ Gyvi duomenys (ne failuose): `GET /api/parking` – laisvos vietos JUDU aikštel
 | JUDU neįgaliųjų vietos | GALIMA | `neigaliuju_parkavimo_vietos_view/FeatureServer/0` | nenurodyta | 140 taškų su vietų skaičiumi – tiktų profiliui „turiu neįgaliojo kortelę“ |
 | JUDU nemokamas biudžetinių įstaigų parkavimas | GALIMA | `Biudzetiniu_imoniu_parkavimas_nemokamas_peržiūra/FeatureServer/0` | nenurodyta | 119 taškų (2022 m.), rezervuota konkrečioms įstaigoms |
 | JUDU „Stovėjimo vietų zona“, „Riboto stovėjimo zona su apribojimais“ | NETINKA | – | – | Poligonai be atributų; reikšmė neaprašyta |
-| JUDU `Stovėjimo_vietos_*` (1022 taškai) | NETINKA | – | – | Tai **paspirtukų** stovėjimo vietos, ne automobilių |
+| JUDU `Stovėjimo_vietos_peržiūra` (1022 taškai) | NAUDOJAMA (deriniams) | `Stovėjimo_vietos_peržiūra/FeatureServer/0` | nenurodyta | **Paspirtukų** stovėjimo vietos (ne automobilių): derinys „automobilis + paspirtukas“ baigia važiavimą prie jų, Senamiestyje kelionė paspirtuku baigiasi jose → `scooter-spots.json` |
+| JUDU `Senamiestis_paspirtukai` | NAUDOJAMA (deriniams) | `Senamiestis_paspirtukai/FeatureServer/0` | nenurodyta | Senamiesčio zona, kurioje paspirtukus galima palikti tik pažymėtose vietose |
 | 2020 m. kilpiniai užimtumo tyrimai (`arcgis.sisp.lt/…/Parkavimas_*`, `Kilpinio_*`) | NETINKA | – | – | Viešai neužklausiami |
 
 Visi JUDU sluoksniai – iš [JUDU ArcGIS organizacijos](https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services) ir [arcgis.sisp.lt](https://arcgis.sisp.lt/arcgis/rest/services/Hosted).

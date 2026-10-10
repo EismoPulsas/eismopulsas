@@ -17,7 +17,8 @@ const NOMINATIM = "https://nominatim.openstreetmap.org";
 const LT_BBOX = "20.9,53.85,26.9,56.47";
 const TTL = 24 * 60 * 60 * 1000;
 
-type GeocodeHit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop" };
+/** `cat`: OpenStreetMap key=value (office=company, shop=mall…); the planner guesses how long the car stays from it. */
+type GeocodeHit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop"; cat?: string };
 
 const cache = new Map<string, { at: number; body: unknown }>();
 async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
@@ -79,7 +80,7 @@ function fromPhoton(f: PhotonFeature): GeocodeHit | null {
     kind = "address";
   }
   if (!label) return null;
-  return { lat, lng, label, sub, kind };
+  return { lat, lng, label, sub, kind, cat: p.osm_key && p.osm_value ? `${p.osm_key}=${p.osm_value}` : undefined };
 }
 
 async function photonSearch(q: string, near: LatLng | null): Promise<GeocodeHit[]> {
@@ -100,11 +101,11 @@ async function nominatimSearch(q: string): Promise<GeocodeHit[]> {
   });
 }
 
-async function reverse(p: LatLng): Promise<{ label: string | null; sub: string | null }> {
+async function reverse(p: LatLng): Promise<{ label: string | null; sub: string | null; cat?: string }> {
   try {
     const body = (await getJson(`${PHOTON}/reverse?lat=${p[0]}&lon=${p[1]}&limit=1`)) as { features: PhotonFeature[] };
     const hit = body.features[0] && fromPhoton(body.features[0]);
-    if (hit) return { label: hit.label, sub: hit.sub };
+    if (hit) return { label: hit.label, sub: hit.sub, cat: hit.cat };
   } catch (err) {
     console.error("Photon reverse failed:", err);
   }

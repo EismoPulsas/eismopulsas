@@ -4,9 +4,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { LatLng } from "@/lib/geo";
 import { BusIcon, LocateIcon, PinIcon } from "./icons";
 
-export type Place = { pos: LatLng; label: string };
+/** `cat`: OpenStreetMap key=value of the place (office=company, shop=mall…), when known. */
+export type Place = { pos: LatLng; label: string; cat?: string };
 
-type Hit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop" };
+type Hit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop"; cat?: string };
 type Status = "idle" | "loading" | "done" | "error";
 
 /** "Vilniaus universitetas" + "Saulėtekio al. 9, Vilnius" -> "Vilniaus universitetas, Vilnius" */
@@ -88,7 +89,7 @@ export function PlaceInput({
   const choose = (h: Hit) => {
     setOpen(false);
     setQuery(null);
-    onChange({ pos: [h.lat, h.lng], label: h.kind === "stop" ? `${h.label} (stotelė)` : placeLabel(h.label, h.sub) });
+    onChange({ pos: [h.lat, h.lng], label: h.kind === "stop" ? `${h.label} (stotelė)` : placeLabel(h.label, h.sub), cat: h.kind === "stop" ? "highway=bus_stop" : h.cat });
   };
 
   const showList = open && query !== null && query.trim().length >= 2;
