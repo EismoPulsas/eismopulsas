@@ -27,7 +27,8 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 - `/profilis`: automobilis (kuras, sąnaudos, kaina), elektromobilis (jungtys, AC/DC galia, baterija, JUDU leidimas), stovėjimo trukmė,
   didžiausias ėjimas, bilietai, prioritetas – saugoma tik naršyklėje
 - Nustatymai: kuro tipas, sąnaudos, kaina, stovėjimo trukmė, vienkartinis ar 30 d. bilietas, nuolaidos, kelionių per savaitę
-- Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), mokamo parkavimo zonos, Cyclocity stotelės
+- Žemėlapio sluoksniai: A juostos, gyvas eismas (eismoinfo.lt), Cyclocity stotelės, parkavimas (zonos, aikštelės su gyvu laisvų vietų skaičiumi, stovėjimas
+  gatvėse ir draudžiamos zonos priartinus, kortelė su kainomis ir užimtumo grafiku), įkrovimas (tik elektromobiliams)
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
 
 ## Duomenų šaltiniai
@@ -43,13 +44,18 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 | [LHMT – Meteo.lt API](https://api.meteo.lt/) | orų prognozės maršruto pradžioje, viduryje ir pabaigoje; CC BY-SA 4.0 |
 | [JUDU – rinkliavos zonos nuo 2025-07-01](https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/rinkliavos_zonos_2025_07/FeatureServer/5) | Vilniaus zonų kainos ir laikas (CC BY-NC 4.0) |
 | [Klaipėdos m. sav. – parkavimo zonos](https://maps.klaipeda.lt/arcgis/rest/services/Parkavimo_zonos/MapServer) | parkavimo kainos ir laikas |
-| [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | automobilio, dviračio, pėsčiųjų maršrutai |
+| JUDU – aikštelės, užimtumas (dabar ir istorija), gyventojų leidimų zonos, stovėjimas gatvėse, draudžiamos zonos | aikštelės, tikimybė rasti vietą, gatvės |
+| [UNIPARK aikštelių puslapiai](https://unipark.lt/parkavimas-mieste/vilnius/), prekybos centrų svetainės | privačių aikštelių kainos |
+| OpenStreetMap (Overpass) | kitos aikštelės, stovėjimas gatvėse |
+| [Via Lietuva – įkrovimo prieigos (OCPI)](https://ev.vialietuva.lt/atviri-duomenys-1) | elektromobilių įkrovimas, gyva būsena (CC BY 4.0) |
+| [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | dviračio, pėsčiųjų ir atsarginiai automobilio maršrutai |
 | [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
 | [Cyclocity Vilnius (GBFS)](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | dviračių nuomos stotelės ir laisvi dviračiai, gyvai |
 | [OpenFreeMap](https://openfreemap.org) | vektorinis žemėlapio pagrindas (MapLibre) |
 
 Visas sąrašas su endpoint'ais, podėliu ir licencijomis: [DUOMENYS.md](DUOMENYS.md).
+Visas parkavimo ir įkrovimo šaltinių sąrašas (ir netinkami) – [docs/parkavimas-duomenys.md](docs/parkavimas-duomenys.md).
 
 Bilietų kainos – `lib/fares.ts` (Vilnius – JUDU, Kaunas – kaunas.lt; kitų miestų ir tarpmiestinių – apytikslės, UI rodo „≈“).
 Degalų kainos – LEA vidurkiai, vartotojas gali pasikeisti.
@@ -119,6 +125,7 @@ GET /api/traffic
 GET /api/bikeshare
 GET /api/scooters?bbox=54.66,25.24,54.70,25.32
 GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
+GET /api/parking[?chargers=1]
 ```
 
 `/api/plan` priima ir `walk=10` (didžiausias ėjimas nuo automobilio, min.) ir grąžina `car.parkingOptions`; kainas pagal profilį skaičiuoja naršyklė.
@@ -135,12 +142,17 @@ GET /api/geocode?q=Gedimino pr. 9, Vilnius[&near=54.68,25.28]
 - `lib/fares.ts` – bilietų kainos
 - `lib/server/transit.ts` – RAPTOR maršrutizatorius per `data/transit.json.gz`
 - `lib/server/traffic.ts` – eismoinfo.lt jutikliai ir piko valandų vertinimas
-- `lib/server/osrm.ts`, `lanes.ts`, `parking.ts` – gatvių maršrutai, A juostos, parkavimo zonos
+- `lib/server/driving.ts`, `tomtom.ts`, `weather.ts` – car-leg orchestration, traffic provider and weather alerts
+- `lib/departure.ts`, `driving.ts` – Lithuanian time conversion, car-leg projection and Waze links
+- `lib/server/osrm.ts`, `lanes.ts` – gatvių maršrutai, A juostos
+- `lib/server/parking.ts` – parkavimo vietos prie B (zonos, gatvės, aikštelės, įkrovimas); `live-parking.ts` – gyvi JUDU ir įkrovimo duomenys
 - `lib/server/micromobility.ts` – Cyclocity GBFS ir paspirtuko maršrutas
 - `lib/server/scooters.ts` – paspirtukų srautas (GBFS arba DEMO)
 - `components/planner/BottomSheet.tsx` – tempiamas rezultatų skydelis telefone
-- `app/api/*` – `plan`, `traffic`, `bikeshare`, `scooters`, `geocode`
-- `scripts/build-data.mjs` – duomenų paruošimas
+- `components/planner/ParkingCard.tsx` – aikštelės / gatvės / įkroviklio kortelė su užimtumo grafiku; `parking-meta.ts` – spalvos ir klasės
+- `app/profilis/page.tsx` → `components/profile/ProfileView.tsx` – profilis; `components/planner/settings.ts` – jo saugojimas naršyklėje
+- `app/api/*` – `plan`, `drive`, `traffic`, `bikeshare`, `scooters`, `geocode`, `parking`
+- `scripts/build-data.mjs` – duomenų paruošimas; `scripts/build-parking.mjs` – parkavimas ir įkrovimas; `data/curated-parking.json` – prekybos centrai
 
 ## Darbo tvarka
 

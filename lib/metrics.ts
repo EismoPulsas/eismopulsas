@@ -99,7 +99,6 @@ export const isEv = (s: Settings) => s.fuel === "electric" || (s.fuel === "hybri
 /** JUDU issues the EV permit for fully electric cars only, not hybrids. */
 const hasEvPermit = (s: Settings) => s.fuel === "electric" && s.evPermit;
 
-export type ModeId = "car" | "transit" | "bike" | "walk";
 export type ModeId = "car" | "transit" | "bikeshare" | "scooter" | "bike" | "walk";
 
 /** `unknown`: the price could not be worked out; `value` is then 0 and must not be shown as a price. */

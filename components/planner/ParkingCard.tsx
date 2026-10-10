@@ -90,7 +90,7 @@ export function ParkingCard({ pick, live, settings, onClose }: { pick: MapPick; 
     <div
       role="dialog"
       aria-label={title}
-      className="absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]/97 shadow-2xl backdrop-blur sm:w-[360px]"
+      className="pointer-events-auto absolute bottom-3 left-3 z-[600] flex max-h-[calc(100%-24px)] w-[calc(100%-24px)] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]/97 shadow-2xl backdrop-blur sm:w-[360px]"
     >
       <div className="flex items-start gap-2 p-3 pb-2">
         <div className="min-w-0 flex-1">
