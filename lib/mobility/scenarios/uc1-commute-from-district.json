@@ -1,0 +1,12 @@
+{
+  "origin": { "lat": 54.7775, "lng": 25.231, "label": "Bajorų g., Lindiniškės (Vilniaus r.)" },
+  "destination": { "lat": 54.6873532, "lng": 25.2817067, "label": "Gedimino pr. 9, Vilnius" },
+  "arriveBy": "2026-10-12T08:45:00+03:00",
+  "stayMinutes": 540,
+  "profile": {
+    "car": { "available": true, "fuel": "petrol", "consumption": 7 },
+    "transitPass": false,
+    "maxWalkMin": 15,
+    "preference": "balanced"
+  }
+}

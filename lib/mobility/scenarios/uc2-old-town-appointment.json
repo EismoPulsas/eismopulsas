@@ -1,0 +1,12 @@
+{
+  "origin": { "lat": 54.6773338, "lng": 25.212767, "label": "Erfurto g. 10, Vilnius" },
+  "destination": { "lat": 54.6780388, "lng": 25.2856992, "label": "Vokiečių g. 2, Vilnius" },
+  "arriveBy": "2026-10-13T10:30:00+03:00",
+  "stayMinutes": 60,
+  "profile": {
+    "car": { "available": true, "fuel": "petrol", "consumption": 7 },
+    "transitPass": false,
+    "maxWalkMin": 15,
+    "preference": "balanced"
+  }
+}
