@@ -7,6 +7,7 @@ import "server-only";
 import { demoRouting } from "./demo";
 import { PARK_AND_RIDE_SITES, PARK_AND_RIDE_SOURCE } from "./judu-park-ride";
 import { juduParkingZones } from "./judu-parking-zones";
+import { juduParkingOccupancy } from "./judu-parking-occupancy";
 import type { PlanDeps, RoutingProvider } from "./types";
 
 const ROUTING: Record<string, RoutingProvider> = {
@@ -22,6 +23,7 @@ export function getProviders(): PlanDeps {
     routing,
     parkingZones: juduParkingZones,
     parkRide: { source: PARK_AND_RIDE_SOURCE, sites: PARK_AND_RIDE_SITES },
+    parkingAvailability: juduParkingOccupancy,
     now: () => new Date(),
   };
 }

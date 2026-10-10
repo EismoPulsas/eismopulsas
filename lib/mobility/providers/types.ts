@@ -2,7 +2,7 @@
 // a real routing engine (e.g. OpenTripPlanner, ADR-0002) replaces DemoRoutingProvider
 // by implementing RoutingProvider. Providers never see the user's profile.
 
-import type { Basis, LatLng, Leg, LineString, Place, SourceRef } from "../types";
+import type { Basis, LatLng, Leg, LineString, ParkingInfo, Place, SourceRef } from "../types";
 
 export type StreetPath = { distanceKm: number; durationMin: number; geometry: LineString | null; basis: Basis };
 
@@ -39,9 +39,22 @@ export type ParkRideSite = {
   capacity: number | null;
 };
 
+export type ParkingAvailabilitySnapshot = {
+  source: SourceRef;
+  /** Official P+R site ids; null = missing, invalid, stale or unavailable. */
+  bySiteId: Record<string, ParkingInfo["availability"]>;
+};
+
+export interface ParkingAvailabilityProvider {
+  /** Current observations, not a prediction for the requested arrival time. */
+  snapshot(): Promise<ParkingAvailabilitySnapshot>;
+}
+
 export type PlanDeps = {
   routing: RoutingProvider;
   parkingZones: ParkingZoneProvider;
   parkRide: { source: SourceRef; sites: ParkRideSite[] };
+  /** Optional enricher; omitting it keeps deterministic offline/demo planning. */
+  parkingAvailability?: ParkingAvailabilityProvider;
   now: () => Date;
 };

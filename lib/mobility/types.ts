@@ -86,7 +86,7 @@ export type ParkingInfo = {
   name: string;
   costEur: number | null;
   paidMinutes: number | null;
-  /** Real-time free spaces; null until a live occupancy provider is connected. */
+  /** Current observed free spaces (not predicted at arrival); null = unknown/stale/unavailable. */
   availability: { vacant: number; capacity: number; observedAt: string } | null;
   basis: Basis;
 };

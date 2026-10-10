@@ -156,7 +156,10 @@ interface RoutingProvider {
   transit(from: Place, to: Place, arriveBy: Date): Promise<TransitItinerary | null>; // legs, ride span, pkm, transfers
 }
 interface ParkingZoneProvider { readonly source: SourceRef; zoneAt(p: LatLng): Promise<string | null> } // throws on failure
-type PlanDeps = { routing; parkingZones; parkRide: { source; sites }; now };
+interface ParkingAvailabilityProvider {
+  snapshot(): Promise<{ source: SourceRef; bySiteId: Record<string, ParkingInfo["availability"]> }>;
+}
+type PlanDeps = { routing; parkingZones; parkRide: { source; sites }; parkingAvailability?; now };
 ```
 
 | Provider | File | Status | Source |
@@ -165,7 +168,7 @@ type PlanDeps = { routing; parkingZones; parkRide: { source; sites }; now };
 | Routing: OpenTripPlanner | `providers/otp.ts` | **PLANNED** (ADR-0002) | OTP GraphQL ← JUDU GTFS + OSM |
 | P+R sites | `providers/judu-park-ride.ts` | CURRENT (static, official) | judu.lt |
 | Paid-zone lookup | `providers/judu-parking-zones.ts` | CURRENT (live, 2,5 s timeout, 24 h cache, failure → `null` cost + warning) | JUDU ArcGIS layer |
-| Enricher: P+R / lot occupancy | — | PLANNED (P1) | JUDU occupancy layer (DATA.md › A4b); fills `parking.availability` |
+| Enricher: P+R occupancy | `providers/judu-parking-occupancy.ts` + `judu-parking-occupancy-data.ts` | CURRENT (3 P+R sites) | JUDU occupancy layer (DATA.md › A4b); fills `parking.availability` |
 | Enricher: live transit | — | PLANNED (P1) | stops.lt GTFS-RT (to confirm) or `gps_full.txt` |
 | Enricher: weather | — | PLANNED (P1) | Meteo.lt |
 
@@ -173,6 +176,7 @@ Rules:
 - **Selection:** `MOBILITY_ROUTING_PROVIDER` (server env; default `demo`; `providers/index.ts`). An unknown value throws, so demo data is **never** served silently in place of a configured real provider.
 - **Adding a real provider:** implement `RoutingProvider`, register it in `providers/index.ts`, document the source in DATA.md. `plan.ts`, the rules, the contract and the app do not change. Legs must carry their real `basis` (`official` for timetable, `live` for real-time).
 - **Enrichers** must have a time budget and fall back to static data. They report through `sources[]`/`warnings[]`.
+- **Occupancy:** fetched once in parallel with eligible P+R routes, attached by canonical site id to the selected option. Optional in injected `PlanDeps`. Timeout 2,5 s, 30 s cache/backoff, observation age ≤2 min (30 s future clock tolerance). Missing/invalid/stale/error → `null` + `parking_availability_unknown`, with static site/ticket/route data retained. It does not rank or reject a site: observations describe now, not the trip's future arrival. Counts, source fetch time and observation time are preserved; demo legs and `dataMode` keep their existing meaning.
 - **Demo legs** never carry real line numbers (`line: null`) and are always labelled. Do not tune the demo provider to make a desired option win.
 
 Provider choice and alternatives (JUDU planner API, OTP, Google Routes, Transitous): [ADR-0002](docs/adr/0002-routing-provider-strategy.md).
@@ -225,6 +229,7 @@ Provider choice and alternatives (JUDU planner API, OTP, Google Routes, Transito
 ```
 
 - **Geometry** is GeoJSON `LineString` (`[lng, lat]`), `null` for park legs.
+- **Availability** uses the existing shape `{ vacant, capacity, observedAt } | null`: integer counts from a fresh JUDU P+R observation, ISO observation time, or unknown. The option references `judu-parking-occupancy` in `sources`; that `SourceRef` carries `basis: "live"`, endpoint, licence and successful `fetchedAt` (unchanged on cache hits). Parking `basis` describes the ticket/price, not occupancy. Current occupancy does not change route `dataMode` or predict vacancy at arrival. Street zones still have `availability: null`.
 - **Errors:** HTTP 400 with `{ error, code }`, where `error` is Lithuanian. Codes:
   - `invalid_json`, `invalid_body`, `invalid_place`, `out_of_service_area`, `same_place`;
   - `invalid_arrive_by`, `arrive_by_out_of_range`, `invalid_stay`, `invalid_profile`.

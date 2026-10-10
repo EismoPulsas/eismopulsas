@@ -25,7 +25,7 @@ Android programėlė, kuri į klausimą **„Kaip man geriausia nuvykti šiandie
 | Maršrutų tiekėjas | **Demonstracinis (sintetinis)**; kitas žingsnis – OpenTripPlanner + JUDU GTFS (ADR-0002) |
 | P+R aikštelės, P+R bilietas, VT bilietų kainos, gatvių zonų tarifai | **TIKRI JUDU duomenys** (DATA.md › A4b, A6) |
 | Stovėjimo zona tikslo vietoje | **Gyvai iš JUDU ArcGIS sluoksnio** |
-| P+R ir aikštelių laisvos vietos realiu laiku | Šaltinis rastas ir patikrintas (JUDU sluoksnis, atnaujinamas kas 30 s), **dar neprijungtas** |
+| P+R ir aikštelių laisvos vietos realiu laiku | **BFF PRIJUNGTA**: 3 P+R aikštelės, `parking.availability` su stebėjimo laiku; pasenę / nepasiekiami duomenys → nežinoma. Rodymas telefone ir kitos aikštelės dar neįgyvendinta |
 | CO₂ koeficientai | JK Vyriausybės 2025 m. (artinys, pažymėta „~“) |
 | Kuro kaina | Prielaida (pažymėta), vartotojas gali nurodyti savo |
 
@@ -67,7 +67,7 @@ Atlikta = veikia **tikrame Android telefone** pagal [PRODUCT.md › Version 0.1]
 | Srautas | Užduotis | Failai | Liečia sutartį? |
 |---|---|---|---|
 | **1. Maršrutai (OTP)** | Docker OTP 2.x su JUDU GTFS + Vilniaus OSM; `providers/otp.ts`, `MOBILITY_ROUTING_PROVIDER=otp`, `OTP_BASE_URL` | `lib/mobility/providers/otp.ts`, `providers/index.ts` | Ne |
-| **2. Gyvi P+R duomenys** | JUDU užimtumo sluoksnis → `parking.availability` (laisvos vietos P+R) su laiku ir „© JUDU“; ekrane – „Laisvų vietų: 90“ | naujas `lib/mobility/providers/judu-occupancy.ts`, `plan.ts`, `mobile/src/app/route/[id].tsx`, `ui/option-row.tsx` | Ne (laukas jau yra) |
+| **2. Gyvi P+R duomenys** | **BFF atlikta**: JUDU → `parking.availability` su laiku ir „© JUDU“. **Liko UI**: ekrane – „Laisvų vietų: 90“ | `lib/mobility/providers/judu-parking-occupancy.ts`, `judu-parking-occupancy-data.ts`, `plan.ts`; liko `mobile/src/app/route/[id].tsx`, `ui/option-row.tsx` | Ne (laukas jau yra) |
 | **3. Programėlė telefone** | Expo Go bandymas, klaidų taisymas, didelis šriftas, TalkBack, šviesi / tamsi tema | `mobile/src/**` | Ne |
 | **4. Demo ir pristatymas** | Scenarijų paruošimas, „Darbas“ kelionė, Vercel diegimas, skaidrės, vaizdo įrašas; klausimai JUDU mentoriams (DATA.md › A2) | `README.md`, scenarijai | Ne |
 
@@ -75,7 +75,7 @@ Sutartis tarp programėlės ir BFF – **ROUTING.md § 9** ir `lib/mobility/type
 
 ## P1 — tik kai P0 veikia telefone
 
-- P+R ir aikštelių laisvos vietos (šaltinis yra – žr. 2 srautą).
+- P+R laisvų vietų rodymas telefone ir kitų aikštelių integracija (3 P+R aikštelių BFF jau veikia – žr. 2 srautą).
 - Realaus laiko vėlavimai (stops.lt GTFS-RT, jei JUDU patvirtins) per OTP.
 - Orai (Meteo.lt) pėstiesiems ir dviratininkams.
 - Ėjimas pėsčiomis, dviratis, „parkuok ir eik“ (JUDU aikštelės).

@@ -9,7 +9,7 @@ Three parts:
 
 # PART A — RULES FOR EVERY CHANGE
 
-- **No automated test suite exists**: no test runner, no `test` script, no CI config. Verification today means the two automated checks (`npm run lint`, `npm run build`) plus deliberate manual checks.
+- **No general automated test suite exists**: no test runner, no `test` script, no CI config. Verification means the two automated checks (`npm run lint`, `npm run build`), deliberate manual checks, and the focused JUDU occupancy assertion script (B4a).
 - **Identify the area first** (AGENTS.md): mobile, BFF, legacy web, shared data, or docs. Then run that area's checks, **and** the root checks whenever root files change.
 - Verify the behaviour you changed **and** its neighbours.
 - Data and recommendation changes are verified against numbers, not by eye.
@@ -122,6 +122,22 @@ Simulate each failure (via provider configuration, an invalid key in a local env
 | Nominatim 502 / slow | Inline "Adreso paieška nepavyko" with retry; the typed text is kept. |
 | P+R list empty for the corridor | No P+R option; reason line shown. |
 | Constant missing (e.g. no CO₂ factor) | The metric shows "—", not 0. |
+
+## B4a. Focused JUDU occupancy checks (CURRENT)
+
+Run from the root after `npm ci`:
+
+```bash
+node scripts/check-judu-occupancy.mjs
+node scripts/check-judu-occupancy.mjs --live
+node scripts/check-judu-occupancy.mjs --api http://localhost:3000
+```
+
+This standalone assertion script uses the existing TypeScript compiler to transpile pure modules into a unique temporary directory and removes it after the check. It adds no dependency, test framework or npm script. Sixteen offline checks cover all three site mappings, zero vacancy, Unicode/whitespace normalization, malformed/duplicate rows, negative/null/fractional/inconsistent counts, status errors, stale/future timestamps, ArcGIS errors/truncation, cache/coalescing/failure recovery, deterministic demo planning, unchanged metrics/recommendation/provenance, each P+R site and no occupancy requests without eligible P+R candidates. A throwing enricher must retain the P+R route with unknown availability and a warning.
+
+`--live` verifies the public source still has exactly one row per official P+R name, prints only parsed availability/timestamps, and permits unknown for stale/invalid observations. `--api` exercises the three prepared scenarios with tomorrow's arrival time, asserts v1/demo/no-store, occupancy provenance or unknown warnings, GET 405, and validation 400s. Root lint/build remain required. Physical-phone checks are for UI changes; this backend enrichment does not verify presentation of live availability on a device.
+
+Verification 2026-10-10: root lint/build passed; 16 offline checks, 17 with `--live`, and 20 with `--api http://localhost:3017` passed against `next start`. Live parsing covered all three P+R sites; the API scenarios returned fresh observations for their selected sites. No-car API returned transit only with no occupancy source. Relevant legacy/shared smoke checks passed: `/statistika`, `/apie`, accidents filtered query (2 features), invalid year (400), and geocode short query (200, empty array). `git diff --check` passed. Mobile files and API type shapes were unchanged; device/UI checks were not run.
 
 ## B5. Android device testing
 

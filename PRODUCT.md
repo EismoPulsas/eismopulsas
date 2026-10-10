@@ -95,7 +95,7 @@ Home → work or university, arriving by a fixed time (e.g. 08:45).
 A doctor's appointment in Vilnius Old Town. The questions the app should help with:
 - Should I drive all the way?
 - What will parking cost?
-- Is parking likely to be available? (P1. JUDU publishes live free spaces for its gated lots, including the P+R sites; see DATA.md › A4b.)
+- Is parking likely to be available? (CURRENT for the three P+R sites: the BFF exposes observed free spaces when fresh; this is not an arrival-time prediction. Other gated lots remain P1; see DATA.md › A4b.)
 - Should I park outside the centre and walk?
 - Should I use P+R and public transport?
 - Should I take public transport for the whole trip?
@@ -128,7 +128,7 @@ v0.1 corresponds exactly to **P0 in PLAN.MD**. It is done when the following wor
 | 6 | Save a trip under a name ("Darbas") and reopen it with one tap | CURRENT |
 | 7 | Data limitations visible: "~" estimates, demo/official/live provenance, missing data shown as unknown, never 0 | CURRENT |
 | 8 | Two prepared scenarios, UC1 commute and UC2 Old Town (`lib/mobility/scenarios/`), computed live or clearly labelled | PARTIAL: they run on demo legs with a live zone lookup |
-| 9 | A new real-time source is added as a provider/enricher without rewriting the comparison or the UI | CURRENT by design (ROUTING.md § 8); first real provider: OTP (ADR-0002) |
+| 9 | A new real-time source is added as a provider/enricher without rewriting the comparison or the UI | CURRENT: JUDU occupancy enriches the existing P+R availability field (backend); first real routing provider remains OTP (ADR-0002) |
 
 ## Non-goals for v0.1
 

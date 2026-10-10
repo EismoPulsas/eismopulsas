@@ -298,7 +298,7 @@ flowchart LR
   GEO --> NOM[(Nominatim)]
   PROV --> ZONES[("JUDU ArcGIS paid zones<br/>CURRENT (live lookup)")]
   PROV -. PLANNED, ADR-0002 .-> OTP[("OpenTripPlanner<br/>← JUDU GTFS + OSM")]
-  PROV -. P1 .-> OCC[("JUDU occupancy layer<br/>verified available")]
+  PROV --> OCC[("JUDU occupancy layer<br/>CURRENT, 3 P+R sites")]
   PROV -. P1 .-> RT[("stops.lt GTFS-RT / gps_full.txt")]
 ```
 
@@ -350,10 +350,12 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
 | `lib/mobility/explain.ts` | Lithuanian explanations from metric differences (pure) |
 | `lib/mobility/format.ts`, `geo.ts` | lt-LT formatting, plural; haversine, Vilnius time, hash |
 | `lib/mobility/config.ts` | Constants with source and status (DATA.md › A6) |
-| `lib/mobility/providers/` | `types.ts` (interfaces), `demo.ts` (**DEMO**), `judu-park-ride.ts`, `judu-parking-zones.ts` (`server-only`), `index.ts` (selection, `server-only`) |
+| `lib/mobility/providers/` | `types.ts` (interfaces), `demo.ts` (**DEMO**), `judu-park-ride.ts`, `judu-parking-zones.ts` (`server-only`), `judu-parking-occupancy.ts` (`server-only` fetch), `judu-parking-occupancy-data.ts` (pure parser + injected-loader cache), `index.ts` (selection, `server-only`) |
 | `lib/mobility/scenarios/` | Demo/regression request bodies (TESTING.md › B2–B3) |
 
 `server-only` is imported by the modules that do I/O or read env (`providers/index.ts`, `providers/judu-parking-zones.ts`). The pure modules stay importable from plain Node scripts.
+
+`PlanDeps.parkingAvailability` is an optional `ParkingAvailabilityProvider`, registered in `getProviders()`. One snapshot enriches the selected P+R site by canonical id. The service uses a 2,5 s timeout, coalesces concurrent fetches and caches for 30 s per instance; it validates observation age on cache hits. Stale (>2 min), invalid, missing or failed data gives `availability: null` with a warning. It preserves live provenance and timestamps while keeping routes, metrics and demo labels unchanged. Omitting the enricher preserves deterministic offline tests. `scripts/check-judu-occupancy.mjs` exercises this path (TESTING.md B4a).
 
 ## B4. Mobile ↔ BFF communication
 
@@ -364,7 +366,7 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
 - Missing base URL → the app shows "Nenustatytas serverio adresas" instead of failing silently.
 - Plain `http://` to a LAN address is normally fine in Expo Go during development (not verified on a device here). A release APK should use HTTPS (the Vercel URL), because Android blocks cleartext traffic by default.
 - React Native `fetch` is not subject to CORS. The BFF sends no CORS headers; a web build of the app would need them (not planned).
-- Timeouts: 15 s on the client; 2,5 s for the zone lookup on the server.
+- Timeouts: 15 s on the client; 2,5 s each for zone lookup and occupancy on the server (in parallel).
 - Versioning: the response carries `version: 1`. Contract changes go through ROUTING.md § 9 + `lib/mobility/types.ts` in one PR; the app's type-check catches drift.
 
 ## B5. Root tooling isolation (CURRENT, ADR-0003)
@@ -384,7 +386,7 @@ The app has its own `package.json`, `package-lock.json`, `tsconfig.json` (path a
 | Routing provider | legs and durations | **DEMO** today; OpenTripPlanner next (ADR-0002) |
 | JUDU ArcGIS paid-zone layer | parking cost at the destination | CURRENT (live point lookup) |
 | JUDU P+R page | P+R sites and ticket | CURRENT (static, in code) |
-| JUDU occupancy layer | free spaces at P+R / gated lots | VERIFIED AVAILABLE, not integrated (P1) |
+| JUDU occupancy layer | current free spaces at the three P+R sites | CURRENT, optional enricher; other gated lots remain P1 |
 | JUDU GTFS, stops.lt GTFS-RT, `gps_full.txt` | timetable / live delays via OTP | VERIFIED AVAILABLE / RESEARCHED, not integrated |
 | Meteo.lt | weather (P1) | VERIFIED AVAILABLE, not integrated |
 | OSM Nominatim via `/api/geocode` | address search | CURRENT |
@@ -436,5 +438,6 @@ Merge-conflict hotspots: `lib/mobility/types.ts` (contract), `lib/mobility/confi
 4. **Time handling:** arrive-by with offsets; server-side Vilnius local time (`geo.ts › vilniusParts`); the GTFS service day (times > 24:00) when OTP lands; DST.
 5. **Per-instance caches on Vercel** (zone lookup, geocode), as in A14 #9.
 6. **ArcGIS layer changes:** the zone lookup depends on the field `Zona` and the zone names in `config.ts › PARKING_ZONES`. An unknown zone name yields a `null` cost and a stated reason.
+   Occupancy matches only the three official `pavadinimas` values (Unicode/case/whitespace normalized). Name/schema changes, inconsistent counts and old timestamps give unknown, never fabricated counts. Current vacancy is not a forecast or reservation.
 7. **Google Maps key in the APK:** it must be restricted; never reuse a server key.
 8. **Unverified constants:** CO₂ factors are UK proxies and energy prices are assumptions (DATA.md › A6). They are always shown with "~".

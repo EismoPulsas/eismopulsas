@@ -29,13 +29,14 @@ profile, saved trips      ──plan──▶   app/api/mobility/plan → lib/mo
                                       ├─ providers/judu-park-ride.ts  CURRENT ──────────▶  judu.lt P+R page (static list)
                                       ├─ providers/judu-parking-zones.ts CURRENT ───────▶  JUDU ArcGIS paid-zone layer (live lookup)
                                       ├─ config.ts  CURRENT (fares, tariffs, CO₂, prices) ▶ judu.lt, JUDU ArcGIS, DESNZ 2025, assumptions
-                                      └─ enrichers  PLANNED: P+R occupancy, live transit, weather
+                                      ├─ providers/judu-parking-occupancy.ts CURRENT ───▶ JUDU live P+R occupancy (3 sites)
+                                      └─ enrichers  PLANNED: live transit, weather
 address search            ─────────▶  /api/geocode (CURRENT, legacy) ──────────────────▶  OSM Nominatim
 ```
 
 Kinds of data:
 - **Static, versioned:** the P+R site list, fares, zone tariffs and emission factors live in code (`lib/mobility/config.ts`, `providers/judu-park-ride.ts`). Each cites a source and a "verified on" date.
-- **Live, proxied:** routing (when real), geocoding, the paid-zone lookup, and (P1) occupancy, vehicle delays and weather. Each goes through the BFF with a timeout, a cache and a fallback.
+- **Live, proxied:** routing (when real), geocoding, the paid-zone lookup and P+R occupancy; vehicle delays and weather remain P1. Each goes through the BFF with a timeout, a cache and a fallback.
 - **Personal, on device:** profile and saved trips (and, in P1, the parked car). These are never stored on the server (ROUTING.md § 10).
 
 Every option metric carries a `basis` (`demo` / `estimate` / `official` / `live`, ROUTING.md § 4). Every response carries `dataMode` and `sources[]`.
@@ -52,7 +53,7 @@ Every option metric carries a `basis` (`demo` / `estimate` / `official` / `live`
 | JUDU journey planner (stops.lt) | **BLOCKED / PARTNER ACCESS NEEDED** | https://www.stops.lt/vilnius/sisp.html#plan (linked from judu.lt) | — | Web UI only; no documented API. We do not reverse-engineer it |
 | **JUDU P+R ("Statyk ir važiuok") page** | **CURRENT** (static list + ticket) | https://judu.lt/vairuotojams/statyk-ir-vaziuok-aiksteles/ | P+R sites and price for `park_and_ride` | 3 sites: Ukmergės g. 246, Savanorių pr. 124, V. Pociūno g. 8 (coordinates from the page's map links). One ticket = **1,00 €**: parking for one car + public transport for one person until the end of the day; +1 € per overdue day. Details A4b |
 | **JUDU paid street-parking zones** (ArcGIS layer `rinkliavos_zonos_2025_07`) | **CURRENT** (live point lookup) | https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/rinkliavos_zonos_2025_07/FeatureServer/5 | Destination zone → parking cost for `car` | Public FeatureServer published by JUDU (item `a9f4b1b0…`); **licence CC BY-NC 4.0, © JUDU**. 22 polygons; fields `Zona`, `Mokama`, `Rinkliava`, `Pastaba`. Tariffs transcribed into `config.ts` (A6). The viewer "Naujas parkavimo zonų žemėlapis" in the catalogue shows the same zones |
-| **JUDU gated-lot occupancy** (ArcGIS layer `aiksteliu_uzimtumas_actual`) | **VERIFIED AVAILABLE** | https://arcgis.sisp.lt/arcgis/rest/services/Hosted/aiksteliu_uzimtumas_actual/FeatureServer/0 | Live free spaces at P+R sites and gated lots (P1 enricher) | Public layer behind JUDU's official occupancy map (judu.lt/parkavimo-zemelapis → ArcGIS Experience `68a6513f…`; announced 2026-02-11). The item metadata documents it: updated **every 30 s**, sources "softra" and "citypro", **CC BY-NC 4.0**. 31 lots incl. **all 3 P+R sites**. Fields: `capacity`, `occupied`, `vacant`, `status`, `timestamp_ms`, `pavadinimas`. Quality: negative `occupied` seen; one lot in `status=error`. Not in the open-data catalogue, so confirm intended reuse with JUDU mentors |
+| **JUDU gated-lot occupancy** (ArcGIS layer `aiksteliu_uzimtumas_actual`) | **CURRENT** (3 P+R sites only) | https://arcgis.sisp.lt/arcgis/rest/services/Hosted/aiksteliu_uzimtumas_actual/FeatureServer/0 | Live free spaces at P+R sites, optional enricher | Public layer behind JUDU's official occupancy map (judu.lt/parkavimo-zemelapis → ArcGIS Experience `68a6513f…`; announced 2026-02-11). The item metadata documents it: updated **every 30 s**, sources "softra" and "citypro", **CC BY-NC 4.0**. 31 lots incl. **all 3 P+R sites**. Schema and P+R names re-fetched 2026-10-10. Quality: negative `occupied` seen; one lot in `status=error`. Not in the open-data catalogue, so confirm intended reuse with JUDU mentors |
 | JUDU lot boundaries (`aiksteliu_ribos`) | **VERIFIED AVAILABLE** | https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/aiksteliu_ribos/FeatureServer/9 | Lot polygons, capacity, price | 42 polygons, CC BY 4.0. P1 "park and walk" |
 | JUDU parking facilities page | **VERIFIED AVAILABLE** | https://judu.lt/vairuotojams/stovejimo-aiksteles-vilniuje/ | 26 JUDU lots (19 gated, 7 open) with minimum fee and hourly rate | HTML table; not used in v0.1 (the car option uses street zones) |
 | **JUDU fares** | **CURRENT** (static) | https://judu.lt/viesojo-transporto-keleiviams/bilietu-rusys-ir-kainos/ | Transit cost | 30 min 1,00 €; 60 min 1,25 €; unlimited transfers within validity; 30-day pass 38 €. Effective date not stated on the page |
@@ -129,12 +130,14 @@ The model counts 1,00 € per trip for P+R and **no separate transit fare**.
 - Outside every zone, street parking is treated as free (0 €, labelled).
 - If the lookup fails, the car cost is `null` ("nežinoma"), never 0.
 
-**Occupancy (VERIFIED AVAILABLE, not integrated).** Query pattern for the P1 enricher, a public ArcGIS REST query:
+**Occupancy (CURRENT, optional P+R enricher).** `providers/judu-parking-occupancy.ts` queries the public ArcGIS REST layer:
 `…/aiksteliu_uzimtumas_actual/FeatureServer/0/query?where=1=1&outFields=pavadinimas,capacity,occupied,vacant,status,timestamp_ms&returnGeometry=false&f=json`.
-- Match on `pavadinimas`.
-- Treat `status ≠ "ok"` or a negative `occupied` as unknown.
-- Show the observation time.
-- Attribute "© JUDU, CC BY-NC 4.0".
+- Match the three official `pavadinimas` values above to canonical site ids, allowing Unicode NFC, case and whitespace normalization only; unmatched or duplicate rows are unknown.
+- Accept only `status = "ok"`, positive integer capacity, nonnegative integer occupied/vacant counts, and `occupied + vacant = capacity`. Never clamp or derive missing counts. `vacant = 0` is a valid full lot.
+- `timestamp_ms` is Unix milliseconds (ArcGIS date). Missing, invalid, more than 2 minutes old, or more than 30 seconds in the future → `parking.availability: null` and `parking_availability_unknown` warning for the selected P+R option.
+- Preserve the observation time in `availability.observedAt`; preserve the actual successful fetch time in `sources[].fetchedAt`, including cache hits. Source carries `basis: "live"`, the endpoint and "CC BY-NC 4.0, © JUDU". The existing parking `basis` continues to describe the official ticket; route `dataMode` remains `demo` while legs are demo.
+- Timeout 2,5 s; 30 s in-memory cache per instance with concurrent request coalescing. Recheck observation age on every cache read. Failures back off for 30 s and return unknown; old counts are never served after a failed refresh. HTTP-200 ArcGIS error envelopes and truncated result sets also fail closed.
+- This is **occupancy now, not a prediction at arrival**, including trips planned for tomorrow. It enriches the selected P+R option without changing route selection, feasibility or prices. Other gated lots and street-parking availability are not integrated; no personal coordinates are sent to this feed.
 
 ## A5. Data needed per mode and metric
 
@@ -146,7 +149,7 @@ The model counts 1,00 € per trip for P+R and **no separate transit fare**.
 | Car energy cost | P0 | consumption (profile) × price | profile CURRENT; price = labelled assumption unless the user gives one | — |
 | **P+R** sites + price | P0 | JUDU P+R page | **CURRENT** | if none is on the way: no P+R option, reason shown |
 | **Parking** cost at destination | P0 | zone lookup + tariffs + stay | **CURRENT** (live lookup, official tariffs, estimate per minute) | lookup failure → cost "nežinoma" + warning |
-| Parking / P+R availability | P1 | occupancy layer | VERIFIED AVAILABLE | not shown; never guessed |
+| P+R availability | P1, explicitly integrated | occupancy layer | **CURRENT** (3 P+R sites) | null + warning on missing, stale, invalid or failed data; never guessed |
 | **Walking** legs | P0 | router | DEMO today | — |
 | Walking/cycling comfort | P1 | Meteo.lt | VERIFIED AVAILABLE | ignore weather |
 | Cycling, bike share | P1 | OSM / city layers / Cyclocity | RESEARCHED / POSSIBLE | not offered |
@@ -171,6 +174,7 @@ All constants live in `lib/mobility/config.ts` with a source comment and a `stat
 | Petrol / hybrid, diesel, LPG, electricity price | €/l, €/kWh | 1,80 / 2,00 / 0,85 / 0,25 | team assumption (a third-party republication of the EU Oil Bulletin showed ~1,80 €/l petrol and ~2,00 €/l diesel for LT in Aug 2026) | **assumption**; replace with the Commission's Oil Bulletin |
 | Car: find a space + walk | min | 8 in a paid zone, 4 otherwise | team assumption | assumption |
 | P+R: park | min | 3 | team assumption | assumption |
+| Occupancy cache / maximum observation age / future clock tolerance | s | 30 / 120 / 30 | operational policy in `providers/judu-parking-occupancy-data.ts`; layer advertises 30 s refresh | **assumption**, not an upstream freshness guarantee |
 | Default parking stay | min | 120 | team assumption (stated in the response) | assumption |
 | P+R "on the way" | ratio / km | detour ≤ 1,4 × direct; site ≥ 2 km from destination | team assumption | assumption |
 | Balanced tolerance; explanation thresholds | min, €, % | ROUTING.md § 6–7 | team assumption | assumption |

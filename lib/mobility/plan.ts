@@ -281,6 +281,7 @@ export async function planTrip(req: ValidRequest, deps: PlanDeps): Promise<PlanR
   const warnings: PlanWarning[] = [];
   const unavailable: Unavailable[] = [];
   const drafts: Draft[] = [];
+  let occupancySource: SourceRef | undefined;
 
   // Public transport (JUDU network: both ends inside the city).
   const transitTask = (async () => {
@@ -337,9 +338,11 @@ export async function planTrip(req: ValidRequest, deps: PlanDeps): Promise<PlanR
       unavailable.push({ strategy: "park_and_ride", code: "no_site_on_the_way", text: "Pakeliui nėra „Statyk ir važiuok“ aikštelės." });
       return;
     }
+    // Availability is optional and never removes a route or changes its metrics.
+    const occupancyPromise = deps.parkingAvailability?.snapshot().catch(() => null);
     try {
-      const built = (await Promise.all(sites.map((s) => parkAndRideDraft(s, origin, destination, arriveBy, car, deps)))).filter(
-        (d): d is Draft => d !== null,
+      const built = (await Promise.all(sites.map(async (site) => ({ site, draft: await parkAndRideDraft(site, origin, destination, arriveBy, car, deps) })))).filter(
+        (entry): entry is { site: ParkRideSite; draft: Draft } => entry.draft !== null,
       );
       if (built.length === 0) {
         unavailable.push({ strategy: "park_and_ride", code: "no_connection", text: "Nuo „Statyk ir važiuok“ aikštelės viešojo transporto jungties nerasta." });
@@ -348,8 +351,22 @@ export async function planTrip(req: ValidRequest, deps: PlanDeps): Promise<PlanR
       // One P+R option: the best site for this preference.
       const key = (d: Draft) =>
         profile.preference === "cheapest" ? (d.metrics.costEur ?? Infinity) : profile.preference === "greener" ? (d.metrics.co2Kg ?? Infinity) : d.metrics.durationMin;
-      built.sort((a, b) => key(a) - key(b) || a.metrics.durationMin - b.metrics.durationMin);
-      drafts.push(built[0]);
+      built.sort((a, b) => key(a.draft) - key(b.draft) || a.draft.metrics.durationMin - b.draft.metrics.durationMin);
+      const selected = built[0];
+      if (occupancyPromise) {
+        const occupancy = await occupancyPromise;
+        const availability = occupancy?.bySiteId[selected.site.id] ?? null;
+        if (selected.draft.parking) selected.draft.parking.availability = availability;
+        if (occupancy) {
+          occupancySource = occupancy.source;
+          selected.draft.sources.push(occupancy.source.id);
+        }
+        if (availability === null) warnings.push({
+          code: "parking_availability_unknown",
+          text: "„Statyk ir važiuok“ užimtumo duomenys nepasiekiami, pasenę arba netinkami – laisvų vietų skaičius nežinomas.",
+        });
+      }
+      drafts.push(selected.draft);
     } catch (err) {
       providerFailed("park_and_ride", err, warnings, unavailable);
     }
@@ -398,6 +415,7 @@ export async function planTrip(req: ValidRequest, deps: PlanDeps): Promise<PlanR
   if (used.has(routing.source.id)) sources.push(routing.source);
   if (used.has(FARES_SOURCE.id)) sources.push(FARES_SOURCE);
   if (used.has("judu-park-ride")) sources.push(deps.parkRide.source);
+  if (occupancySource && used.has(occupancySource.id)) sources.push(occupancySource);
   if (used.has(deps.parkingZones.source.id)) sources.push({ ...deps.parkingZones.source, fetchedAt: now.toISOString() });
   if (used.has(CO2_SOURCE.id)) sources.push(CO2_SOURCE);
   if (used.has(ENERGY_PRICE_SOURCE.id)) sources.push(ENERGY_PRICE_SOURCE);
