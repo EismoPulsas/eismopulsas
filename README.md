@@ -9,7 +9,7 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 
 ## Kas veikia
 
-- A / B: adresų ir stotelių paieška rašant, smeigtukas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
+- A / B: adresų ir stotelių paieška rašant – iš adresų registro ir OpenStreetMap vietų mūsų serveryje (keletas ms, tik Lietuva, be diakritikų, su namų numeriais), smeigtukas žemėlapyje, „mano vieta“, tempiami žymekliai, nuoroda pasidalinti (`?from=&to=`)
 - Išvykimas dabar arba pasirinktu laiku
 - **Kuo keliausite:** po A ir B – žymimieji langeliai „Automobilis“, „Viešasis tr.“, „Paspirtukas“, „Dviratis“ (ir „Turiu savo paspirtuką / dviratį“).
   Rodomi tik būdai, naudojantys vien pažymėtas priemones (ėjimas – kartu su visais; vien pėsčiomis – kai iki 15 min.). Pasirinkimas saugomas profilyje
@@ -52,6 +52,7 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
   gatvėse ir draudžiamos zonos priartinus, kortelė su kainomis ir užimtumo grafiku), įkrovimas (tik elektromobiliams).
   Visi sluoksniai pradžioje išjungti; pasirinkus automobilį, Cyclocity ar paspirtuką įjungiamas tam būdui aktualus sluoksnis prie maršruto.
 - `/apie` – kaip skaičiuojame, visos formulės ir šaltiniai
+- `/apie-mus` – kuo Eismo Pulsas skiriasi nuo navigacijos programėlių
 
 ## Duomenų šaltiniai
 
@@ -73,7 +74,9 @@ Naudojami valstybės ir miestų atviri duomenys bei pasirenkama TomTom eismo pas
 | [Via Lietuva – įkrovimo prieigos (OCPI)](https://ev.vialietuva.lt/atviri-duomenys-1) | elektromobilių įkrovimas, gyva būsena (CC BY 4.0) |
 | [Valhalla (FOSSGIS)](https://valhalla1.openstreetmap.de/) | dviračio, paspirtuko ir pėsčiųjų maršrutai |
 | [OSRM (FOSSGIS)](https://routing.openstreetmap.de/) | ėjimas iki stotelių ir tarp jų; atsarginiai dviračio, pėsčiųjų ir automobilio maršrutai |
-| [Photon (komoot)](https://photon.komoot.io/), atsarginis Nominatim | adresų paieška rašant (per `/api/geocode`) |
+| [Registrų centras – adresų registras](https://www.registrucentras.lt/p/1187) | adresų paieška rašant (per `/api/geocode`): visos gyvenvietės, gatvės ir pastatų adresai, ieškoma serveryje |
+| OpenStreetMap (Overpass) | paieškai – rajonai, prekybos centrai, mokyklos, stotys ir kitos vietos |
+| [Photon (komoot)](https://photon.komoot.io/) | kitų vietų pavadinimai, kai registras nieko neranda (≤ 1,8 s) |
 | geoBoundaries (OSM) | Lietuvos siena žemėlapio kaukei |
 | [Cyclocity Vilnius (GBFS)](https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/gbfs.json) | dviračių nuomos stotelės ir laisvi dviračiai, gyvai |
 | [OpenFreeMap](https://openfreemap.org) | vektorinis žemėlapio pagrindas (MapLibre) |
@@ -120,11 +123,11 @@ Tests use deterministic provider/sensor/weather fixtures, including quota/authen
 
 ```bash
 npm run data              # viskas
-npm run data -- transit   # tik dalis: transit | lanes | parking | street | scooters | chargers | border
+npm run data -- transit   # tik dalis: transit | lanes | parking | street | scooters | chargers | border | addresses | places
 ```
 
 Tvarkaraščiai galioja 6 savaites nuo paruošimo dienos (vėlesnei datai imama ta pati savaitės diena), todėl
-`npm run data -- transit` verta paleisti bent kartą per mėnesį. Atsisiuntimai talpinami `.cache/`.
+`npm run data -- transit` verta paleisti bent kartą per mėnesį, `addresses` ir `places` – kas kelis mėnesius (adresų registras atnaujinamas kas mėnesį). Atsisiuntimai talpinami `.cache/`.
 
 ## Paspirtukų duomenys
 

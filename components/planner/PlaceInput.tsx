@@ -7,7 +7,8 @@ import { BusIcon, LocateIcon, PinIcon } from "./icons";
 /** `cat`: OpenStreetMap key=value of the place (office=company, shop=mall…), when known. */
 export type Place = { pos: LatLng; label: string; cat?: string };
 
-type Hit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop"; cat?: string };
+/** `pick`: the text the box takes when the hit is chosen ("Gedimino pr. 9, Vilnius"). */
+type Hit = { lat: number; lng: number; label: string; sub: string; kind: "address" | "street" | "place" | "poi" | "stop"; cat?: string; pick?: string };
 type Status = "idle" | "loading" | "done" | "error";
 
 /** "Vilniaus universitetas" + "Saulėtekio al. 9, Vilnius" -> "Vilniaus universitetas, Vilnius" */
@@ -79,7 +80,7 @@ export function PlaceInput({
         .catch((e) => {
           if (e.name !== "AbortError") setStatus("error");
         });
-    }, 280);
+    }, 150);
     return () => {
       clearTimeout(t);
       ctrl.abort();
@@ -89,7 +90,7 @@ export function PlaceInput({
   const choose = (h: Hit) => {
     setOpen(false);
     setQuery(null);
-    onChange({ pos: [h.lat, h.lng], label: h.kind === "stop" ? `${h.label} (stotelė)` : placeLabel(h.label, h.sub), cat: h.kind === "stop" ? "highway=bus_stop" : h.cat });
+    onChange({ pos: [h.lat, h.lng], label: h.kind === "stop" ? `${h.label} (stotelė)` : (h.pick ?? placeLabel(h.label, h.sub)), cat: h.kind === "stop" ? "highway=bus_stop" : h.cat });
   };
 
   const showList = open && query !== null && query.trim().length >= 2;
@@ -97,7 +98,7 @@ export function PlaceInput({
   return (
     <div className="relative flex items-center gap-2">
       <span
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-white font-display text-sm font-extrabold text-white"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-white font-display text-sm font-extrabold text-white max-lg:h-6 max-lg:w-6 max-lg:text-xs"
         style={{ background: color }}
         aria-hidden
       >
@@ -105,7 +106,7 @@ export function PlaceInput({
       </span>
       <div className="relative min-w-0 flex-1">
         <input
-          className="field pr-[4.5rem] text-base lg:text-sm"
+          className="field pr-[4.5rem] text-base max-lg:rounded-xl max-lg:py-[7px] lg:text-sm"
           style={active ? { borderColor: "var(--marking)" } : undefined}
           value={text}
           placeholder={placeholder}

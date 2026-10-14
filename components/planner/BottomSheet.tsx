@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 export type Snap = "peek" | "half" | "full";
 
-const PEEK = 156; // px: handle + one row of results
+const PEEK = 136; // px: handle + one row of results
 const HANDLE = 28;
 
 /** Viewport height, kept in sync with the on-screen keyboard and rotation. */
@@ -26,7 +26,8 @@ function useViewportHeight() {
 export function sheetVisible(snap: Snap, vh: number, topInset = 0) {
   // Full height stops just below the floating search card.
   const full = Math.round(Math.min(vh * 0.9, vh - topInset - 8));
-  return snap === "full" ? full : snap === "half" ? Math.round(vh * 0.52) : Math.min(PEEK, full);
+  // Half leaves at least half of the screen to the map, as navigation apps do.
+  return snap === "full" ? full : snap === "half" ? Math.round(vh * 0.46) : Math.min(PEEK, full);
 }
 
 /**

@@ -93,9 +93,9 @@ const SOURCES = [
   },
   {
     name: "Adresų paieška",
-    who: "Photon (komoot) pagal OpenStreetMap, atsarginis – Nominatim",
-    url: "https://photon.komoot.io/",
-    use: "Adresai ir vietos tik Lietuvoje; VT stotelės – iš tvarkaraščių.",
+    who: "Registrų centras – Lietuvos Respublikos adresų registras; vietos – OpenStreetMap",
+    url: "https://www.registrucentras.lt/p/1187",
+    use: "Visos Lietuvos gyvenvietės, gatvės ir pastatų adresai su koordinatėmis, rajonai, prekybos centrai, mokyklos, stotys – ieškoma mūsų serveryje, tik Lietuvoje. VT stotelės – iš tvarkaraščių; kitų vietų pavadinimai – Photon (komoot).",
   },
   {
     name: "Dviračių nuomos stotelės",
