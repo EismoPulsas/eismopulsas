@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
       "./public/data/lot-occupancy.json",
       "./public/data/chargers.json",
     ],
-    "/api/geocode": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
+    "/api/geocode": ["./data/transit.json.gz", "./data/addresses.json.gz", "./data/places.json.gz", "./public/data/bus-lanes.json"],
     "/api/scooters": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
     "/api/stops": ["./data/transit.json.gz", "./public/data/bus-lanes.json"],
   },

@@ -29,7 +29,7 @@ import type { PlanResponse } from "@/lib/plan-types";
 import { Logo } from "../Logo";
 import { BottomSheet, type Snap } from "./BottomSheet";
 import { fmtClock } from "./format";
-import { BikeIcon, BusIcon, CarIcon, ChevronIcon, GearIcon, ScooterIcon, SwapIcon } from "./icons";
+import { BikeIcon, BusIcon, CarIcon, ChevronIcon, ClockIcon, GearIcon, InfoIcon, ScooterIcon, SwapIcon } from "./icons";
 import { useLiveParking } from "./live";
 import type { Layers } from "./MapView";
 import { HybridCarousel, OptionTiles } from "./Options";
@@ -42,12 +42,12 @@ import { signals, type Signals } from "./Results";
 import { Savings } from "./Savings";
 import { useSettings } from "./settings";
 import { tripNav, tripOf, type AnyOption } from "./stages";
-import { TravelModes, travelOn } from "./TravelModes";
+import { TravelModes, TravelModesCompact, travelOn } from "./TravelModes";
 import { TripDetails } from "./TripDetails";
 import { useCarDrive } from "./useCarDrive";
 import { useHybrids } from "./useHybrids";
 import { PRIORITIES, SettingsPanel } from "./SettingsPanel";
-import { LiveStatus, NavButton, NowClock } from "./Trip";
+import { LiveStatus, MenuButton, NavButton, NowClock, RefreshButton } from "./Trip";
 
 /** Desktop: the planner card floats over the map; the map keeps its content clear of it. */
 const PANEL_LEFT = 24 + 560;
@@ -74,7 +74,7 @@ async function reverse(p: LatLng): Promise<{ label: string; cat?: string }> {
   try {
     const r = await fetch(`/api/geocode?lat=${p[0]}&lng=${p[1]}`);
     const d = await r.json();
-    if (d.label) return { label: placeLabel(d.label, d.sub), cat: d.cat };
+    if (d.label) return { label: d.pick ?? placeLabel(d.label, d.sub), cat: d.cat };
   } catch {}
   return { label: `${p[0].toFixed(4)}, ${p[1].toFixed(4)}` };
 }
@@ -331,6 +331,12 @@ export default function Planner() {
       logTrip({ from: from.pos, to: to.pos, toLabel: to.label, date: plan.depart.date, weekday: plan.depart.weekday, departSec: plan.depart.sec, arriveSec: plan.depart.sec + opt.duration });
   };
 
+  const onTravel = (next: typeof settings) => {
+    setSettings(next);
+    // Ticking "electric" with parking on the map brings the chargers in too.
+    if (isEv(next) && !ev && layers.parking && !layers.charging) setLayers({ ...layers, charging: true });
+  };
+
   const pickStay = (hours: number) => {
     setStayPick({ key: queryKey, hours });
     if (to && currentPlan) rememberStay(to.pos, currentPlan.depart.weekday, arriveSec, hours);
@@ -406,6 +412,19 @@ export default function Planner() {
             {notice}
           </div>
         )}
+        {!(from && to) && !picked && (
+          // At first sight this is a map like any other: a small sign on its side says what is different.
+          <Link
+            href="/apie-mus"
+            className="tap glass absolute z-[600] flex h-9 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 pr-2.5 pl-1.5 text-xs font-semibold shadow-lg backdrop-blur hover:border-[var(--marking)] lg:h-10 lg:text-[13px]"
+            style={{ top: "var(--map-overlay-top)", left: "var(--map-overlay-left)" }}
+          >
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--marking)]">
+              <InfoIcon size={15} />
+            </span>
+            Kuo mes kitokie?
+          </Link>
+        )}
         {picked && (
           // On phones the card sits between the search card and the results sheet.
           <div
@@ -431,51 +450,72 @@ export default function Planner() {
       <aside className="pointer-events-none absolute inset-0 z-[1000] flex flex-col lg:pointer-events-auto lg:inset-auto lg:top-6 lg:bottom-6 lg:left-6 lg:w-[560px] lg:overflow-y-auto lg:rounded-[28px] lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
         <div
           ref={topRef}
-          className="pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-2xl border border-[var(--line)] bg-[var(--panel)]/95 shadow-xl backdrop-blur lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
+          className="glass pointer-events-auto mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] rounded-[22px] max-lg:relative max-lg:z-[1100] lg:m-0 lg:mt-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none"
         >
-          <header className="flex items-center gap-3 px-3 pt-2.5 pb-2 lg:sticky lg:gap-2 lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur">
+          <header className={`flex items-center gap-3 pt-1.5 pr-1.5 pb-0.5 pl-3.5 lg:sticky lg:gap-2 lg:top-0 lg:z-20 lg:border-b lg:border-[var(--line)] lg:bg-[var(--panel)]/95 lg:px-6 lg:py-4 lg:backdrop-blur ${collapsed ? "max-lg:hidden" : ""}`}>
             <Logo />
             <span className="ml-auto hidden min-w-0 lg:flex">
               <LiveStatus departAt={departAt} />
             </span>
-            <nav className="ml-auto flex shrink-0 items-center gap-0.5 lg:ml-0">
+            <span className="ml-auto flex items-center gap-1 lg:hidden">
+              {plan && (
+                <button type="button" onClick={() => setEditing(false)} className="tap rounded-full px-3 py-1.5 text-sm font-semibold text-[var(--marking)] hover:bg-[var(--accent-soft)]">
+                  Gerai
+                </button>
+              )}
+              <MenuButton />
+            </span>
+            <nav className="ml-auto hidden shrink-0 items-center gap-0.5 lg:ml-0 lg:flex">
               <Link href="/profilis" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-1.5 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Profilis
               </Link>
               <Link href="/apie" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-1.5 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
                 Kaip skaičiuojame
               </Link>
+              <Link href="/apie-mus" className="rounded-md px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] lg:px-1.5 lg:py-1.5 lg:text-[13px] whitespace-nowrap">
+                Apie mus
+              </Link>
             </nav>
           </header>
 
           {collapsed && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(true);
-                setSnap("peek");
-              }}
-              className="flex w-full items-center gap-2 border-t border-[var(--line)] px-3 py-2.5 text-left lg:hidden"
-              aria-label="Keisti maršrutą"
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">
-                  {from?.label} <span className="text-[var(--muted)]">→</span> {to?.label}
+            <div className="flex items-center gap-0.5 py-1.5 pr-1.5 pl-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(true);
+                  setSnap("peek");
+                }}
+                className="tap flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl py-1 pr-1 pl-1.5 text-left"
+                aria-label="Keisti maršrutą"
+              >
+                <span className="flex h-9 w-2.5 shrink-0 flex-col items-center py-0.5" aria-hidden>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[2.5px] border-[#1f2937]" />
+                  <span className="lane-vertical my-0.5 flex-1" />
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#b4232f]" />
                 </span>
-                <span className="flex items-center gap-1 text-xs text-[var(--muted)]">
-                  {departAt ? departAt.replace("T", " ") : "Išvykti dabar"} ·
-                  {TRAVEL_MODES.filter((m) => travelOn(settings, m)).map((m) => {
-                    const Icon = { car: CarIcon, transit: BusIcon, scooter: ScooterIcon, bike: BikeIcon }[m];
-                    return <Icon key={m} size={14} />;
-                  })}
-                  · keisti
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">
+                    {from?.label} <span className="text-[var(--muted)]">→</span> {to?.label}
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                    <span className="truncate">{departAt ? departAt.replace("T", " ") : "Išvykti dabar"}</span>
+                    <span aria-hidden>·</span>
+                    {TRAVEL_MODES.filter((m) => travelOn(settings, m)).map((m) => {
+                      const Icon = { car: CarIcon, transit: BusIcon, scooter: ScooterIcon, bike: BikeIcon }[m];
+                      return <Icon key={m} size={14} className="shrink-0" />;
+                    })}
+                    <span aria-hidden>·</span>
+                    <span className="font-semibold text-[var(--marking)]">keisti</span>
+                  </span>
                 </span>
-              </span>
-              <ChevronIcon className="shrink-0 text-[var(--muted)]" />
-            </button>
+              </button>
+              <RefreshButton busy={updatingCar} onClick={() => setRefresh((v) => v + 1)} className="h-9 w-9 rounded-full hover:bg-[var(--chip)]" />
+              <MenuButton />
+            </div>
           )}
 
-          <div className={`${collapsed ? "hidden lg:flex" : "flex"} flex-col gap-3 px-3 pb-3 lg:gap-4 lg:px-6 lg:pt-5 lg:pb-2`}>
+          <div className={`${collapsed ? "hidden lg:flex" : "flex"} rise flex-col gap-3 px-3 pt-1 pb-2.5 lg:gap-4 lg:px-6 lg:pt-5 lg:pb-2`}>
             <div className={plan ? "hidden" : "hidden lg:block"}>
               <h1 className="font-display text-[22px] leading-tight font-bold">Kuo važiuoti iš A į B?</h1>
               <p className="mt-1 text-sm text-[var(--muted)]">
@@ -486,7 +526,7 @@ export default function Planner() {
             {/* Route box: A and B joined by a dashed lane line. */}
             <div className="relative lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--panel)] lg:p-3 lg:shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
               <div className="flex gap-2">
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex min-w-0 flex-1 flex-col gap-2 max-lg:gap-1.5">
                   <PlaceInput
                     letter="A"
                     color="#1f2937"
@@ -515,7 +555,7 @@ export default function Planner() {
                     setFrom(to);
                     setTo(from);
                   }}
-                  className="grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-[var(--line)] text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)]"
+                  className="tap grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-[var(--line)] text-[var(--muted)] hover:bg-[var(--chip)] hover:text-[var(--ink)] max-lg:h-9 max-lg:w-9 max-lg:rounded-full"
                   title="Sukeisti"
                   aria-label="Sukeisti A ir B"
                 >
@@ -523,7 +563,33 @@ export default function Planner() {
                 </button>
               </div>
 
-              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {/* Phones: when, then by what, in one row of small buttons (like a navigation app's mode row). */}
+              <div className="mt-2 flex items-center gap-1.5 lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setDepartAt(departAt ? null : localNow())}
+                  aria-pressed={!!departAt}
+                  aria-label={departAt ? "Išvykti dabar" : "Išvykti kitu laiku"}
+                  className={`tap flex h-8 shrink-0 items-center gap-1 rounded-full border pr-2 pl-2.5 text-[13px] font-semibold ${departAt ? "border-[var(--ink)] bg-[var(--ink)] text-white" : "border-[var(--line)] bg-[var(--panel)]"}`}
+                >
+                  <ClockIcon size={14} />
+                  {departAt ? "Kitu laiku" : "Dabar"}
+                  {departAt ? <span aria-hidden className="ml-0.5 text-base leading-none opacity-70">×</span> : <ChevronIcon size={13} className="opacity-60" />}
+                </button>
+                <span className="mx-0.5 h-5 w-px shrink-0 bg-[var(--line)]" aria-hidden />
+                <TravelModesCompact s={settings} onChange={onTravel} />
+              </div>
+              {departAt && (
+                <input
+                  type="datetime-local"
+                  className="field mt-2 py-1.5 text-base lg:hidden"
+                  value={departAt}
+                  onChange={(e) => e.target.value && setDepartAt(e.target.value)}
+                  aria-label="Išvykimo laikas"
+                />
+              )}
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-2 max-lg:hidden">
                 <div className="seg">
                   <button type="button" aria-pressed={!departAt} onClick={() => setDepartAt(null)}>
                     Dabar
@@ -535,7 +601,7 @@ export default function Planner() {
                 {departAt && (
                   <input
                     type="datetime-local"
-                    className="field w-auto min-w-0 flex-1 py-1.5 text-base lg:text-sm"
+                    className="field w-auto min-w-0 flex-1 text-base lg:text-sm"
                     value={departAt}
                     onChange={(e) => e.target.value && setDepartAt(e.target.value)}
                     aria-label="Išvykimo laikas"
@@ -544,29 +610,17 @@ export default function Planner() {
                 <span className="ml-auto hidden lg:block">
                   <NowClock departAt={departAt} />
                 </span>
-                {collapsed === false && plan && (
-                  <button type="button" onClick={() => setEditing(false)} className="ml-auto text-sm font-semibold text-[var(--marking)] lg:hidden">
-                    Gerai
-                  </button>
-                )}
               </div>
               {picking && <p className="mt-2 text-xs text-[var(--marking)]">Bakstelėkite žemėlapyje, kur yra {picking === "from" ? "A" : "B"} taškas.</p>}
-              <div className="mt-3 border-t border-[var(--line)] pt-2.5">
-                <TravelModes
-                  s={settings}
-                  onChange={(next) => {
-                    setSettings(next);
-                    // Ticking "electric" with parking on the map brings the chargers in too.
-                    if (isEv(next) && !ev && layers.parking && !layers.charging) setLayers({ ...layers, charging: true });
-                  }}
-                />
+              <div className="mt-3 border-t border-[var(--line)] pt-2.5 max-lg:hidden">
+                <TravelModes s={settings} onChange={onTravel} />
               </div>
             </div>
           </div>
         </div>
 
         <BottomSheet snap={snap} onSnap={setSnap} onVisible={setSheetPx} topInset={topPx}>
-          <div className="flex flex-col gap-4 px-3 pb-6 lg:p-4">
+          <div className="flex min-h-full flex-col gap-4 px-4 pb-6 lg:min-h-0 lg:p-4">
             {loading && (
               <div className="flex items-center gap-3 py-3 text-sm text-[var(--muted)]" role="status">
                 <span className="traffic-light" aria-hidden>
@@ -602,9 +656,10 @@ export default function Planner() {
             )}
 
             {plan && (
-              <>
+              <div className="rise flex flex-col gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="seg min-w-0 flex-1 [&>button]:px-1 sm:[&>button]:px-2" role="group" aria-label="Kas svarbiausia?">
+                  {/* Phones: each priority as wide as its name, so all four fit next to each other. */}
+                  <div className="seg min-w-0 flex-1 [&>button]:px-1.5 lg:[&>button]:px-2 max-lg:overflow-x-auto max-lg:[scrollbar-width:none] max-lg:[&>button]:flex-auto max-lg:[&>button]:text-[12.5px]" role="group" aria-label="Kas svarbiausia?">
                     {PRIORITIES.map((p) => (
                       <button
                         key={p.id}
@@ -620,19 +675,8 @@ export default function Planner() {
                       </button>
                     ))}
                   </div>
-                  <button
-                    type="button"
-                    disabled={updatingCar}
-                    onClick={() => setRefresh((v) => v + 1)}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)] disabled:opacity-50"
-                    title={updatingCar ? "Atnaujinama…" : "Atnaujinti eismą"}
-                    aria-label="Atnaujinti eismą"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={updatingCar ? "animate-spin" : ""}>
-                      <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
-                      <path d="M21 3v5h-5" />
-                    </svg>
-                  </button>
+                  {/* Phones with the route line collapsed: refresh sits in that line instead. */}
+                  <RefreshButton busy={updatingCar} onClick={() => setRefresh((v) => v + 1)} className={`h-9 w-9 rounded-lg border border-[var(--line)] ${collapsed ? "max-lg:hidden" : ""}`} />
                 </div>
                 {stay && plan.car && carWanted && <StayLine stay={stay} onPick={pickStay} />}
 
@@ -669,7 +713,6 @@ export default function Planner() {
                       parking={{ settings: tripSettings, parkingId: chosenParking?.id ?? null, onParking: setParkingId, updating: updatingCar, error: driving.error }}
                       hybridNote={hybridState.note}
                     />
-                    <NavButton nav={nav} className="lg:hidden" />
                   </>
                 )}
 
@@ -680,7 +723,7 @@ export default function Planner() {
                   {plan.bikeshareNote && `${plan.bikeshareNote} `}
                   Duomenys: <span title={`Tvarkaraščiai: ${plan.timetable.window}`}>LTSA GTFS</span>, {plan.car?.traffic.provider === "tomtom" ? "TomTom" : "OSRM / Via Lietuva"}, OpenStreetMap, meteo.lt.
                 </p>
-              </>
+              </div>
             )}
 
             <div className="rounded-2xl border border-[var(--line)] bg-[var(--panel)]/70">
@@ -706,6 +749,12 @@ export default function Planner() {
               )}
             </div>
             <p className="text-[10px] text-[var(--muted)] lg:hidden">Žemėlapis © OpenFreeMap, OpenMapTiles, OpenStreetMap bendruomenė</p>
+            {/* Phones: the way to go stays at the bottom of the open sheet while the details scroll. */}
+            {plan && nav && snap !== "peek" && (
+              <div className="sheet-cta sticky bottom-0 z-10 -mx-4 mt-auto -mb-6 px-4 pt-6 lg:hidden">
+                <NavButton nav={nav} className="tap" />
+              </div>
+            )}
           </div>
         </BottomSheet>
         {plan && nav && (
@@ -728,9 +777,9 @@ function Intro({ onExample }: { onExample: (e: (typeof EXAMPLES)[number]) => voi
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <span className="text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">Pabandykite</span>
-        <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0">
           {EXAMPLES.map((e) => (
-            <button key={e.label} type="button" onClick={() => onExample(e)} className="shrink-0 rounded-full border border-[var(--line)] bg-[var(--chip)] px-3 py-2 text-sm hover:border-[var(--marking)]">
+            <button key={e.label} type="button" onClick={() => onExample(e)} className="tap shrink-0 rounded-full border border-[var(--line)] bg-[var(--chip)] px-3 py-2 text-sm hover:border-[var(--marking)]">
               {e.label}
             </button>
           ))}

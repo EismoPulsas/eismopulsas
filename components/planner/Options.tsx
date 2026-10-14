@@ -122,7 +122,7 @@ export function OptionTiles({
   const sorted = [...modes].sort((a, b) => (a.id === best ? -1 : b.id === best ? 1 : ORDER.indexOf(a.id) - ORDER.indexOf(b.id)));
   const cols = sorted.length === 4 ? "lg:grid-cols-4" : sorted.length <= 2 ? "lg:grid-cols-2" : "lg:grid-cols-3";
   return (
-    <div className={`-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] lg:mx-0 lg:grid lg:overflow-visible lg:px-0 lg:pb-0 ${cols}`}>
+    <div className={`-mx-4 -mb-1.5 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pb-2.5 [scrollbar-width:none] lg:mb-0 lg:mx-0 lg:grid lg:overflow-visible lg:px-0 lg:pb-0 ${cols}`}>
       {sorted.map((m) => {
         const on = m.id === selected;
         const tag = tagOf(plan, m, m.id === best);
@@ -132,7 +132,7 @@ export function OptionTiles({
             type="button"
             onClick={() => onSelect(m.id)}
             aria-pressed={on}
-            className={`flex min-w-[124px] shrink-0 snap-start flex-col items-start gap-2 rounded-2xl bg-[var(--panel)] text-left transition lg:min-w-0 ${cardClass(on)} ${on ? "p-[11px]" : "p-3"}`}
+            className={`tap flex min-w-[108px] shrink-0 grow basis-0 snap-start flex-col items-start gap-1.5 rounded-2xl bg-[var(--panel)] text-left transition lg:min-w-0 lg:gap-2 ${cardClass(on)} ${on ? "p-[9px] lg:p-[11px]" : "p-2.5 lg:p-3"}`}
           >
             <span className="flex w-full items-start justify-between gap-1">
               <ModeBadge mode={m.id} size={26} />

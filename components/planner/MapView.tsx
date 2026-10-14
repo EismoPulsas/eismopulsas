@@ -1133,12 +1133,14 @@ function LayersPanel({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-sm font-semibold shadow-lg backdrop-blur"
+        aria-label="Sluoksniai"
+        className="tap relative flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/95 px-3.5 text-sm font-semibold shadow-lg backdrop-blur max-lg:w-10 max-lg:justify-center max-lg:px-0"
       >
         {LAYERS_ICON}
-        Sluoksniai
+        {/* Phones: just the icon; the switched-on layers as dots on its corner. */}
+        <span className="max-lg:hidden">Sluoksniai</span>
         {active.length > 0 && (
-          <span className="flex -space-x-1">
+          <span className="flex -space-x-1 max-lg:absolute max-lg:-top-1 max-lg:-right-1">
             {active.map((r) => (
               <span key={r.id} className="h-3 w-3 rounded-full ring-2 ring-[var(--panel)]" style={{ background: r.color }} />
             ))}

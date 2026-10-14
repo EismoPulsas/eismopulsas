@@ -185,45 +185,48 @@ body {
 }
 
 /* ---------------------------------------------------------- form bits */
-.field {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--chip);
-  color: var(--ink);
-  padding: 9px 12px;
-  font-size: 14px;
-  outline: none;
-}
-.field:focus,
-.field:focus-within {
-  border-color: var(--marking);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--marking) 22%, transparent);
-}
-.field::placeholder {
-  color: var(--muted);
-}
+/* In the components layer, so utilities next to them (text-base, pr-…, py-…) still apply. */
+@layer components {
+  .field {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--chip);
+    color: var(--ink);
+    padding: 9px 12px;
+    font-size: 14px;
+    outline: none;
+  }
+  .field:focus,
+  .field:focus-within {
+    border-color: var(--marking);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--marking) 22%, transparent);
+  }
+  .field::placeholder {
+    color: var(--muted);
+  }
 
-.seg {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--chip);
-}
-.seg > button {
-  flex: 1;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.seg > button[aria-pressed="true"] {
-  background: var(--panel);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12), 0 0 0 1px var(--line);
+  .seg {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--chip);
+  }
+  .seg > button {
+    flex: 1;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .seg > button[aria-pressed="true"] {
+    background: var(--panel);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12), 0 0 0 1px var(--line);
+  }
 }
 
 /* ---------------------------------------------------------- phone layout */
@@ -242,6 +245,84 @@ body {
   .leaflet-bottom {
     bottom: var(--map-bottom, 0px);
     transition: bottom 260ms;
+  }
+  /* Fingers pinch to zoom, as in navigation apps: no buttons over the map. */
+  .leaflet-control-zoom {
+    display: none;
+  }
+}
+
+/* Phone helpers: in the components layer, so utilities on the same element still win. */
+@layer components {
+  @media (max-width: 1023.98px) {
+    /* Floating glass: the search card and map buttons sit on the map like one layer of glass. */
+    .glass {
+      background: color-mix(in oklab, var(--panel) 92%, transparent);
+      backdrop-filter: blur(14px) saturate(1.4);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4);
+      box-shadow:
+        0 0 0 1px rgba(15, 23, 42, 0.06),
+        0 1px 2px rgba(15, 23, 42, 0.06),
+        0 14px 34px -10px rgba(15, 23, 42, 0.28);
+    }
+
+    /* A finger press is felt: the control sinks a little. */
+    .tap {
+      transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tap:active:not(:disabled) {
+      transform: scale(0.96);
+    }
+
+    /* New content rises into place instead of popping in. */
+    .rise {
+      animation: rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    /* Phones: the way to go stays one thumb away at the bottom of the sheet. */
+    .sheet-cta {
+      background: linear-gradient(to top, var(--panel) 62%, color-mix(in oklab, var(--panel) 0%, transparent));
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pop-in {
+  animation: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .pop-in {
+    animation: none;
+  }
+  .tap:active:not(:disabled) {
+    transform: none;
+  }
+  .sheet {
+    transition: none !important;
   }
 }
 

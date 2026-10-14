@@ -6,7 +6,9 @@
 | Dviračių nuomos stotelės, laisvi dviračiai ir vietos | Cyclocity Vilnius (JCDecaux), GBFS: `https://api.cyclocity.fr/contracts/vilnius/gbfs/v3/` |
 | Dviračio, paspirtuko ir pėsčiųjų maršrutai | Valhalla (FOSSGIS): `https://valhalla1.openstreetmap.de/route` |
 | Ėjimas iki stotelių / tarp jų, atsarginiai maršrutai | OSRM (FOSSGIS): `https://routing.openstreetmap.de` |
-| Adresų paieška | Photon (komoot, OpenStreetMap): `https://photon.komoot.io/api/`; atsarginis – Nominatim: `https://nominatim.openstreetmap.org` |
+| Adresų paieška: gyvenvietės, gatvės, pastatų adresai | Registrų centras, adresų registras (`data/addresses.json.gz`, `npm run data -- addresses`): `https://www.registrucentras.lt/aduomenys/?byla=adr_gra_adresai_LT.zip`, `…?byla=adr_stat_lr.csv`, `…?byla=adr_gatves.csv`, `…?byla=adr_savivaldybes.csv`; gyvenvietės – `https://get.data.gov.lt/datasets/gov/rc/ar/gyvenamojivietove/GyvenamojiVietove/:format/csv` |
+| Adresų paieška: rajonai, prekybos centrai, mokyklos, stotys ir kt. | OpenStreetMap (Overpass) (`data/places.json.gz`, `npm run data -- places`) |
+| Adresų paieška: kitų vietų pavadinimai | Photon (komoot, OpenStreetMap): `https://photon.komoot.io/api/` – tik kai registras nieko neranda, laukiama ≤ 1,8 s; atvirkštinei paieškai, kai taško nėra registre – ir Nominatim |
 | VT stotelių paieška | iš LTSA GTFS (`data/transit.json.gz`) |
 | Paspirtukai | bet koks operatoriaus GBFS srautas per `SCOOTER_GBFS_URL`; kol jo nėra – DEMO duomenys tik dev / preview aplinkose |
 | Paspirtukų stovėjimo vietos, Senamiesčio paspirtukų zona | JUDU: `https://services1.arcgis.com/vVI5TNykiYD9EhM5/arcgis/rest/services/Stov%C4%97jimo_vietos_per%C5%BEi%C5%ABra/FeatureServer/0`, `…/Senamiestis_paspirtukai/FeatureServer/0` |

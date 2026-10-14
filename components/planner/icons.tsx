@@ -106,6 +106,26 @@ export const LayersIcon = ({ size = 18, className }: P) =>
 
 export const ChevronIcon = ({ size = 16, className }: P) => svg(size, className, <path d="m6 9 6 6 6-6" />);
 
+export const MenuIcon = ({ size = 18, className }: P) => svg(size, className, <path d="M4 7h16M4 12h16M4 17h10" />);
+
+export const UserIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <circle cx="12" cy="8" r="3.6" />
+    <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+  </>);
+
+export const InfoIcon = ({ size = 18, className }: P) =>
+  svg(size, className, <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5.5M12 7.6v.01" />
+  </>);
+
+export const RefreshIcon = ({ size = 16, className }: P) =>
+  svg(size, className, <>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+    <path d="M21 3v5h-5" />
+  </>);
+
 export const ClockIcon = ({ size = 16, className }: P) =>
   svg(size, className, <>
     <circle cx="12" cy="12" r="9" />

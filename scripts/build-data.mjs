@@ -2,7 +2,7 @@
 // Builds the data files the route planner reads.
 //
 //   npm run data            # everything
-//   npm run data -- transit # only one part: transit | lanes | parking | street | scooters | chargers | border
+//   npm run data -- transit # only one part: transit | lanes | parking | street | scooters | chargers | border | addresses | places
 //
 // Sources (all open, no keys needed):
 //   - LTSA nacionalinis prieigos taškas, visų Lietuvos viešojo transporto GTFS (visimarsrutai.lt)
@@ -11,9 +11,12 @@
 //   - OpenStreetMap (Overpass): autobusų juostos kituose miestuose
 //   - parkavimas ir elektromobilių įkrovimas – žr. scripts/build-parking.mjs
 //   - geoBoundaries (OpenStreetMap): Lietuvos siena žemėlapio kaukei
+//   - Registrų centras, adresų registras: gatvės, gyvenvietės ir pastatų adresai paieškai – žr. scripts/build-addresses.mjs
 //
 // Outputs:
 //   data/transit.json.gz      – compact timetable for the server-side router
+//   data/addresses.json.gz    – Lithuanian towns, streets and house numbers for the search box
+//   data/places.json.gz       – named places for the search box: districts, malls, schools, stations…
 //   public/data/bus-lanes.json
 //   public/data/{parking,lots,street-parking,lot-occupancy,chargers,scooter-spots}.json (build-parking.mjs)
 //   public/data/lithuania.json
@@ -24,6 +27,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
+import { buildAddresses, buildPlaces } from "./build-addresses.mjs";
 import { buildChargers, buildParking, buildScooterSpots, buildStreet } from "./build-parking.mjs";
 
 // fileURLToPath, not URL.pathname: the latter gives "/C:/…" on Windows.
@@ -484,7 +488,7 @@ async function buildBorder() {
 
 const only = process.argv.slice(2);
 const want = (part) => !only.length || only.includes(part);
-const helpers = { ROOT, CACHE, UA, getJson, cachedDownload, simplify, round5 };
+const helpers = { ROOT, CACHE, UA, getJson, cachedDownload, unzip, csvRows, simplify, round5 };
 if (want("lanes")) await buildLanes();
 if (want("parking")) await buildParking(helpers);
 // `parking` already writes street-parking.json; `street` alone redoes just that file.
@@ -492,4 +496,6 @@ if (only.includes("street") && !only.includes("parking")) await buildStreet(help
 if (want("scooters")) await buildScooterSpots(helpers);
 if (want("chargers")) await buildChargers(helpers);
 if (want("border")) await buildBorder();
+if (want("addresses")) await buildAddresses(helpers);
+if (want("places")) await buildPlaces(helpers);
 if (want("transit")) await buildTransit();

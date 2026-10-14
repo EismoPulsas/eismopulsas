@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { FUELS, isEv, TRAVEL_MODES, type Settings, type TravelMode } from "@/lib/metrics";
+import { BikeIcon, BusIcon, CarIcon, ScooterIcon } from "./icons";
 
 // What the user is willing to travel by, right under A and B. Only options that use these
 // vehicles alone are shown (walking goes with every one); the choice is kept in the profile.
@@ -12,6 +14,7 @@ const TITLE: Record<TravelMode, string> = {
   scooter: "Nuomojamu arba savu paspirtuku",
   bike: "Cyclocity arba savu dviračiu",
 };
+const ICON: Record<TravelMode, (p: { size?: number; className?: string }) => React.ReactNode> = { car: CarIcon, transit: BusIcon, scooter: ScooterIcon, bike: BikeIcon };
 
 export const travelOn = (s: Settings, m: TravelMode) => (m === "car" ? s.hasCar && s.travel.includes("car") : s.travel.includes(m));
 
@@ -25,12 +28,42 @@ function withEv(s: Settings, on: boolean): Settings {
   return { ...s, fuel, consumption: FUELS[fuel].consumption, fuelPrice: FUELS[fuel].price };
 }
 
+function toggled(s: Settings, m: TravelMode, on: boolean): Settings {
+  const travel = on ? [...new Set([...s.travel, m])] : s.travel.filter((x) => x !== m);
+  // Ticking the car means there is one, even if the profile said otherwise.
+  return { ...s, travel, ...(m === "car" && on ? { hasCar: true } : {}) };
+}
+
+const hasExtras = (s: Settings) => travelOn(s, "car") || travelOn(s, "scooter") || travelOn(s, "bike");
+const NONE = "Pažymėkite bent vieną – kitaip liks tik trumpas ėjimas pėsčiomis.";
+
+/** What the ticked vehicles are like: an EV, one's own scooter, one's own bike. */
+function Extras({ s, onChange, className }: { s: Settings; onChange: (s: Settings) => void; className: string }) {
+  return (
+    <div className={className}>
+      {travelOn(s, "car") && (
+        <label className="flex items-center gap-1.5 text-xs" title="Parkavimo vietas rodysime dviem sąrašais: kur galima ir pasikrauti, ir kur tiesiog pastatyti. Jungtis ir JUDU leidimą nurodykite profilyje.">
+          <input type="checkbox" checked={isEv(s)} onChange={(e) => onChange(withEv(s, e.target.checked))} className="h-3.5 w-3.5 accent-[var(--marking)]" />
+          {s.fuel === "hybrid" ? "Įkraunamas hibridas" : "Elektromobilis"}
+        </label>
+      )}
+      {travelOn(s, "scooter") && (
+        <label className="flex items-center gap-1.5 text-xs" title="Nereikės nuomotis: važiuosite savo paspirtuku, o su automobiliu – pastatysite jį bet kur pakeliui ir tęsite paspirtuku.">
+          <input type="checkbox" checked={s.ownScooter} onChange={(e) => onChange({ ...s, ownScooter: e.target.checked })} className="h-3.5 w-3.5 accent-[var(--marking)]" />
+          Turiu savo paspirtuką
+        </label>
+      )}
+      {travelOn(s, "bike") && (
+        <label className="flex items-center gap-1.5 text-xs" title="Vietoj Cyclocity – savo dviračiu (deriniuose su automobiliu lieka Cyclocity).">
+          <input type="checkbox" checked={s.ownBike} onChange={(e) => onChange({ ...s, ownBike: e.target.checked })} className="h-3.5 w-3.5 accent-[var(--marking)]" />
+          Turiu savo dviratį
+        </label>
+      )}
+    </div>
+  );
+}
+
 export function TravelModes({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
-  const toggle = (m: TravelMode, on: boolean) => {
-    const travel = on ? [...new Set([...s.travel, m])] : s.travel.filter((x) => x !== m);
-    // Ticking the car means there is one, even if the profile said otherwise.
-    onChange({ ...s, travel, ...(m === "car" && on ? { hasCar: true } : {}) });
-  };
   const none = !TRAVEL_MODES.some((m) => travelOn(s, m));
   return (
     <fieldset className="flex flex-col gap-2">
@@ -40,7 +73,7 @@ export function TravelModes({ s, onChange }: { s: Settings; onChange: (s: Settin
           const on = travelOn(s, m);
           return (
             <label key={m} className="cursor-pointer" title={TITLE[m]}>
-              <input type="checkbox" className="peer sr-only" checked={on} onChange={(e) => toggle(m, e.target.checked)} />
+              <input type="checkbox" className="peer sr-only" checked={on} onChange={(e) => onChange(toggled(s, m, e.target.checked))} />
               <span
                 className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition select-none peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--marking)] ${
                   on ? "border-[var(--marking)] bg-[var(--accent-soft)] font-semibold text-[var(--marking)]" : "border-[var(--line)] bg-[var(--panel)] text-[var(--muted)] hover:border-[#cbd5e1] hover:text-[var(--ink)]"
@@ -59,29 +92,71 @@ export function TravelModes({ s, onChange }: { s: Settings; onChange: (s: Settin
           );
         })}
       </div>
-      {(travelOn(s, "car") || travelOn(s, "scooter") || travelOn(s, "bike")) && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {travelOn(s, "car") && (
-            <label className="flex items-center gap-1.5 text-xs" title="Parkavimo vietas rodysime dviem sąrašais: kur galima ir pasikrauti, ir kur tiesiog pastatyti. Jungtis ir JUDU leidimą nurodykite profilyje.">
-              <input type="checkbox" checked={isEv(s)} onChange={(e) => onChange(withEv(s, e.target.checked))} className="h-3.5 w-3.5 accent-[var(--marking)]" />
-              {s.fuel === "hybrid" ? "Įkraunamas hibridas" : "Elektromobilis"}
-            </label>
-          )}
-          {travelOn(s, "scooter") && (
-            <label className="flex items-center gap-1.5 text-xs" title="Nereikės nuomotis: važiuosite savo paspirtuku, o su automobiliu – pastatysite jį bet kur pakeliui ir tęsite paspirtuku.">
-              <input type="checkbox" checked={s.ownScooter} onChange={(e) => onChange({ ...s, ownScooter: e.target.checked })} className="h-3.5 w-3.5 accent-[var(--marking)]" />
-              Turiu savo paspirtuką
-            </label>
-          )}
-          {travelOn(s, "bike") && (
-            <label className="flex items-center gap-1.5 text-xs" title="Vietoj Cyclocity – savo dviračiu (deriniuose su automobiliu lieka Cyclocity).">
-              <input type="checkbox" checked={s.ownBike} onChange={(e) => onChange({ ...s, ownBike: e.target.checked })} className="h-3.5 w-3.5 accent-[var(--marking)]" />
-              Turiu savo dviratį
-            </label>
-          )}
+      {hasExtras(s) && <Extras s={s} onChange={onChange} className="flex flex-wrap gap-x-4 gap-y-1" />}
+      {none && <p className="text-xs text-[var(--stop)]">{NONE}</p>}
+    </fieldset>
+  );
+}
+
+/**
+ * Phones: the four vehicles as small round toggles (filled = ticked), like the mode buttons of a
+ * navigation app; EV / own scooter / own bike behind "⋯", with a dot when one of them is on.
+ */
+export function TravelModesCompact({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+  const [more, setMore] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!more) return;
+    const away = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setMore(false);
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [more]);
+  const none = !TRAVEL_MODES.some((m) => travelOn(s, m));
+  const extrasOn = (travelOn(s, "car") && isEv(s)) || (travelOn(s, "scooter") && s.ownScooter) || (travelOn(s, "bike") && s.ownBike);
+  return (
+    <div ref={ref} className="relative flex min-w-0 items-center gap-1" role="group" aria-label="Kuo keliausite?">
+      {TRAVEL_MODES.map((m) => {
+        const on = travelOn(s, m);
+        const Icon = ICON[m];
+        return (
+          <label key={m} className="tap cursor-pointer" title={`${LABEL[m]}: ${TITLE[m].toLowerCase()}`}>
+            <input type="checkbox" className="peer sr-only" checked={on} aria-label={LABEL[m]} onChange={(e) => onChange(toggled(s, m, e.target.checked))} />
+            <span
+              className={`grid h-8 w-8 place-items-center rounded-full border transition peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--marking)] ${
+                on ? "border-[var(--marking)] bg-[var(--marking)] text-white shadow-[0_2px_6px_rgba(5,150,105,0.3)]" : "border-[var(--line)] bg-[var(--panel)] text-[var(--muted)]"
+              }`}
+            >
+              <Icon size={17} />
+            </span>
+          </label>
+        );
+      })}
+      {hasExtras(s) && (
+        <button
+          type="button"
+          onClick={() => setMore(!more)}
+          aria-expanded={more}
+          aria-label="Daugiau: elektromobilis, savas paspirtukas ar dviratis"
+          className={`tap relative grid h-8 w-8 place-items-center rounded-full border text-[var(--muted)] ${more ? "border-[var(--ink)] bg-[var(--ink)] text-white" : "border-[var(--line)] bg-[var(--panel)]"}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+          {extrasOn && <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[var(--marking)] ring-2 ring-[var(--panel)]" />}
+        </button>
+      )}
+      {none && (
+        <span className="ml-1 min-w-0 truncate text-[11px] text-[var(--stop)]" title={NONE}>
+          Pažymėkite bent vieną
+        </span>
+      )}
+      {more && (
+        <div className="pop-in absolute top-full left-0 z-[1300] mt-2 w-full min-w-60 origin-top rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3 shadow-[0_20px_50px_rgba(15,23,42,0.22)]">
+          <Extras s={s} onChange={onChange} className="flex flex-col gap-2.5 [&_input]:h-4 [&_input]:w-4 [&_label]:text-sm" />
         </div>
       )}
-      {none && <p className="text-xs text-[var(--stop)]">Pažymėkite bent vieną – kitaip liks tik trumpas ėjimas pėsčiomis.</p>}
-    </fieldset>
+    </div>
   );
 }
